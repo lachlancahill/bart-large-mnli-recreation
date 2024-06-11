@@ -9,13 +9,12 @@ from transformers import (
     get_linear_schedule_with_warmup,
     set_seed,
 )
-
 from tqdm.auto import tqdm
-import transformers
-import datasets
 from torch.optim import AdamW
 
 from config import model_checkpoint
+
+import evaluate
 
 raw_datasets = load_dataset("glue", "mnli")
 
@@ -26,7 +25,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
 
 def tokenize_function(examples):
     outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation='only_first', padding="max_length",
-                        max_length=1024) # TODO: make max length dynamic.
+                        max_length=1024)  # TODO: make max length dynamic.
     return outputs
 
 
@@ -38,29 +37,34 @@ model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num
 
 train_batch_size = 8
 eval_batch_size = 8
+
+
 def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
     train_dataloader = DataLoader(
         # TODO: Remove filter on training data.
         Subset(tokenized_datasets["train"], range(160_000)), shuffle=False, batch_size=train_batch_size
     )
-    eval_dataloader = DataLoader(
+    eval_matched_dataloader = DataLoader(
         tokenized_datasets["validation_matched"], shuffle=False, batch_size=eval_batch_size
     )
-    return train_dataloader, eval_dataloader
+    eval_mismatched_dataloader = DataLoader(
+        tokenized_datasets["validation_mismatched"], shuffle=False, batch_size=eval_batch_size
+    )
+    return train_dataloader, eval_matched_dataloader, eval_mismatched_dataloader
 
-train_dataloader, eval_dataloader = create_dataloaders()
 
-for batch in train_dataloader:
-    print({k: v.shape for k, v in batch.items()})
-    outputs = model(**batch)
-    break
+train_dataloader, eval_dataloader, eval_mismatched_dataloader = create_dataloaders()
 
-import evaluate
+# for batch in train_dataloader:
+#     print({k: v.shape for k, v in batch.items()})
+#     outputs = model(**batch)
+#     break
+
 
 metric = evaluate.load("glue", "mnli", trust_remote_code=True)
 
-predictions = outputs.logits.detach().argmax(dim=-1)
-metric.compute(predictions=predictions, references=batch["labels"])
+# predictions = outputs.logits.detach().argmax(dim=-1)
+# metric.compute(predictions=predictions, references=batch["labels"])
 
 hyperparameters = {
     "learning_rate": 2e-5,
@@ -78,14 +82,14 @@ def training_function(model):
 
     # To have only one message (and not 8) per logs of Transformers or Datasets, we set the logging verbosity
     # to INFO for the main process only.
-    if accelerator.is_main_process:
-        datasets.utils.logging.set_verbosity_warning()
-        transformers.utils.logging.set_verbosity_info()
-    else:
-        datasets.utils.logging.set_verbosity_error()
-        transformers.utils.logging.set_verbosity_error()
+    # if accelerator.is_main_process:
+    #     datasets.utils.logging.set_verbosity_warning()
+    #     transformers.utils.logging.set_verbosity_info()
+    # else:
+    #     datasets.utils.logging.set_verbosity_error()
+    #     transformers.utils.logging.set_verbosity_error()
 
-    train_dataloader, eval_dataloader = create_dataloaders(
+    train_dataloader, eval_dataloader, eval_mismatched_dataloader = create_dataloaders(
         train_batch_size=hyperparameters["train_batch_size"], eval_batch_size=hyperparameters["eval_batch_size"]
     )
     # The seed need to be set before we instantiate the model, as it will determine the random head.
@@ -97,8 +101,8 @@ def training_function(model):
     # Prepare everything
     # There is no specific order to remember, we just need to unpack the objects in the same order we gave them to the
     # prepare method.
-    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader
+    model, optimizer, train_dataloader, eval_dataloader, eval_mismatched_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader, eval_mismatched_dataloader
     )
 
     num_epochs = hyperparameters["num_epochs"]
