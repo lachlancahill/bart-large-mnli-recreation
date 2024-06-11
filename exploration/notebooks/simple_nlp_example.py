@@ -1,8 +1,13 @@
-import torch
-from torch.utils.data import DataLoader, Subset
+# ! pip install datasets transformers evaluate
+# ! pip install cloud-tpu-client==0.10 torch==2.0.0
+# ! pip install https://storage.googleapis.com/tpu-pytorch/wheels/colab/torch_xla-2.0-cp310-cp310-linux_x86_64.whl
+# ! pip install git+https://github.com/huggingface/accelerate
 
-from accelerate import Accelerator
-from datasets import load_dataset
+import torch
+from torch.utils.data import DataLoader
+
+from accelerate import Accelerator, DistributedType
+from datasets import load_dataset, load_metric
 from transformers import (
     AdamW,
     AutoModelForSequenceClassification,
@@ -12,39 +17,70 @@ from transformers import (
 )
 
 from tqdm.auto import tqdm
-import transformers
+
 import datasets
+import transformers
 
-from config import model_checkpoint
+model_checkpoint = "bert-base-cased"
 
-raw_datasets = load_dataset("glue", "mnli")
+raw_datasets = load_dataset("glue", "mrpc")
 
-print(f'{raw_datasets=}')
+raw_datasets
+
+raw_datasets["train"][0]
+
+import datasets
+# import random
+# import pandas as pd
+# from IPython.display import display, HTML
+
+# def show_random_elements(dataset, num_examples=10):
+#     assert num_examples <= len(dataset), "Can't pick more elements than there are in the dataset."
+#     picks = []
+#     for _ in range(num_examples):
+#         pick = random.randint(0, len(dataset)-1)
+#         while pick in picks:
+#             pick = random.randint(0, len(dataset)-1)
+#         picks.append(pick)
+#
+#     df = pd.DataFrame(dataset[picks])
+#     for column, typ in dataset.features.items():
+#         if isinstance(typ, datasets.ClassLabel):
+#             df[column] = df[column].transform(lambda i: typ.names[i])
+#     display(HTML(df.to_html()))
+#
+# show_random_elements(raw_datasets["train"])
+
+from transformers import AutoTokenizer
 
 tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
 
+tokenizer("Hello, this one sentence!", "And this sentence goes with it.")
 
 def tokenize_function(examples):
-    outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation=True, padding="max_length",
-                        max_length=128)
+    outputs = tokenizer(examples["sentence1"], examples["sentence2"], truncation=True, padding="max_length", max_length=128)
     return outputs
 
+tokenize_function(raw_datasets['train'][:5])
 
-tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, remove_columns=["idx", "premise", "hypothesis"])
+tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, remove_columns=["idx", "sentence1", "sentence2"])
+
 tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
+
+tokenized_datasets["train"].features
+
 tokenized_datasets.set_format("torch")
 
-model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=3)
+from transformers import AutoModelForSequenceClassification
 
-train_batch_size = 16
-eval_batch_size = 16
-def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
+model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=2)
+
+def create_dataloaders(train_batch_size=8, eval_batch_size=32):
     train_dataloader = DataLoader(
-        # TODO: Remove filter on training data.
-        Subset(tokenized_datasets["train"], range(10000)), shuffle=True, batch_size=train_batch_size
+        tokenized_datasets["train"], shuffle=True, batch_size=train_batch_size
     )
     eval_dataloader = DataLoader(
-        tokenized_datasets["validation_matched"], shuffle=False, batch_size=eval_batch_size
+        tokenized_datasets["validation"], shuffle=False, batch_size=eval_batch_size
     )
     return train_dataloader, eval_dataloader
 
@@ -55,9 +91,10 @@ for batch in train_dataloader:
     outputs = model(**batch)
     break
 
-import evaluate
+outputs
 
-metric = evaluate.load("glue", "mnli", trust_remote_code=True)
+import evaluate
+metric = evaluate.load("glue", "mrpc", trust_remote_code=True)
 
 predictions = outputs.logits.detach().argmax(dim=-1)
 metric.compute(predictions=predictions, references=batch["labels"])
@@ -65,12 +102,10 @@ metric.compute(predictions=predictions, references=batch["labels"])
 hyperparameters = {
     "learning_rate": 2e-5,
     "num_epochs": 3,
-    "train_batch_size": train_batch_size,  # Actual batch size will this x 8
-    "eval_batch_size": eval_batch_size,  # Actual batch size will this x 8
-    'gradient_accumulation_steps': 2,
+    "train_batch_size": 8, # Actual batch size will this x 8
+    "eval_batch_size": 32, # Actual batch size will this x 8
     "seed": 42,
 }
-
 
 def training_function(model):
     # Initialize accelerator
@@ -102,13 +137,12 @@ def training_function(model):
     )
 
     num_epochs = hyperparameters["num_epochs"]
-    gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
     # Instantiate learning rate scheduler after preparing the training dataloader as the prepare method
     # may change its length.
     lr_scheduler = get_linear_schedule_with_warmup(
         optimizer=optimizer,
         num_warmup_steps=100,
-        num_training_steps=(len(train_dataloader) // gradient_accumulation_steps) * num_epochs,
+        num_training_steps=len(train_dataloader) * num_epochs,
     )
 
     # Instantiate a progress bar to keep track of training. Note that we only enable it on the main
@@ -120,14 +154,12 @@ def training_function(model):
         for step, batch in enumerate(train_dataloader):
             outputs = model(**batch)
             loss = outputs.loss
-            loss = loss / gradient_accumulation_steps
             accelerator.backward(loss)
-
-            if (step + 1) % gradient_accumulation_steps == 0:
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
-                progress_bar.update(gradient_accumulation_steps)
+            
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+            progress_bar.update(1)
 
         model.eval()
         all_predictions = []
@@ -146,17 +178,18 @@ def training_function(model):
         # The last thing we need to do is to truncate the predictions and labels we concatenated
         # together as the prepared evaluation dataloader has a little bit more elements to make
         # batches of the same size on each process.
-        all_predictions = torch.cat(all_predictions)[:len(tokenized_datasets["validation_matched"])]
-        all_labels = torch.cat(all_labels)[:len(tokenized_datasets["validation_matched"])]
+        all_predictions = torch.cat(all_predictions)[:len(tokenized_datasets["validation"])]
+        all_labels = torch.cat(all_labels)[:len(tokenized_datasets["validation"])]
 
         eval_metric = metric.compute(predictions=all_predictions, references=all_labels)
 
         # Use accelerator.print to print only on the main process.
         accelerator.print(f"epoch {epoch}:", eval_metric)
 
-
 training_function(model)
 
 # from accelerate import notebook_launcher
 #
 # notebook_launcher(training_function, (model,), num_processes=2)
+
+
