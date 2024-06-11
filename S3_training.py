@@ -25,8 +25,8 @@ tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
 
 
 def tokenize_function(examples):
-    outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation=True, padding="max_length",
-                        max_length=1024) # TODO: Update max length to be longer.
+    outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation='only_first', padding="max_length",
+                        max_length=1024) # TODO: make max length dynamic.
     return outputs
 
 
