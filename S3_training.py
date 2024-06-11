@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader, Subset
 from accelerate import Accelerator
 from datasets import load_dataset
 from transformers import (
-    AdamW,
     AutoModelForSequenceClassification,
     AutoTokenizer,
     get_linear_schedule_with_warmup,
@@ -14,6 +13,7 @@ from transformers import (
 from tqdm.auto import tqdm
 import transformers
 import datasets
+from torch.optim import AdamW
 
 from config import model_checkpoint
 
@@ -26,7 +26,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
 
 def tokenize_function(examples):
     outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation=True, padding="max_length",
-                        max_length=128) # TODO: Update max length to be longer.
+                        max_length=1024) # TODO: Update max length to be longer.
     return outputs
 
 
@@ -36,12 +36,12 @@ tokenized_datasets.set_format("torch")
 
 model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=3)
 
-train_batch_size = 16
-eval_batch_size = 16
+train_batch_size = 8
+eval_batch_size = 8
 def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
     train_dataloader = DataLoader(
         # TODO: Remove filter on training data.
-        Subset(tokenized_datasets["train"], range(10000)), shuffle=True, batch_size=train_batch_size
+        Subset(tokenized_datasets["train"], range(160_000)), shuffle=False, batch_size=train_batch_size
     )
     eval_dataloader = DataLoader(
         tokenized_datasets["validation_matched"], shuffle=False, batch_size=eval_batch_size
