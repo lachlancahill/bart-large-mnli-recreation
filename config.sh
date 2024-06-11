@@ -1,0 +1,1 @@
+accelerate config --config_file ./.cache/default_config.yaml

@@ -1,0 +1,1 @@
+accelerate launch ./S3_training.py --config_file ./.cache/default_config.yaml
