@@ -67,7 +67,7 @@ model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num
 
 train_batch_size = 8
 eval_batch_size = 64
-eval_every_x_steps = 20_000
+eval_every_x_steps = 10_000
 save_every_x_steps = eval_every_x_steps
 
 def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
