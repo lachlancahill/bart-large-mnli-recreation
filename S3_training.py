@@ -54,8 +54,10 @@ proj_dir = get_tensorboard_writer_dir()
 
 
 def tokenize_function(examples):
+    # TODO: Figure out a way to actually pad using something other than max_length. Using 'longest' throws errors during evaluation
+    # TODO: Try batch sizes of just 1, with no padding, then just ues gradient accumulation steps. See if the inefficiencies of not using batches are offset by the reduced computation for padded sequences.
     outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation='only_first', padding="max_length",
-                        max_length=1024)  # TODO: make max length dynamic.
+                        max_length=1024)  # TODO: make max length dynamic based on model.
     return outputs
 
 
