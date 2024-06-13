@@ -27,6 +27,7 @@ print(f'{raw_datasets=}')
 tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
 
 
+
 def get_tensorboard_writer_dir():
     run_dir = './runs'
     if not os.path.exists(run_dir):
@@ -52,23 +53,23 @@ def get_tensorboard_writer_dir():
 
 proj_dir = get_tensorboard_writer_dir()
 
+train_batch_size = 8
+eval_batch_size = 8
 
 def tokenize_function(examples):
     # TODO: Figure out a way to actually pad using something other than max_length. Using 'longest' throws errors during evaluation
     # TODO: Try batch sizes of just 1, with no padding, then just ues gradient accumulation steps. See if the inefficiencies of not using batches are offset by the reduced computation for padded sequences.
-    outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation='only_first', padding="max_length",
+    outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation='only_first', padding="longest",
                         max_length=1024)  # TODO: make max length dynamic based on model.
     return outputs
 
 
-tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, remove_columns=["idx", "premise", "hypothesis"])
+tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, remove_columns=["idx", "premise", "hypothesis"], batch_size=train_batch_size)
 tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
 tokenized_datasets.set_format("torch")
 
 model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=3)
 
-train_batch_size = 8
-eval_batch_size = 32
 
 log_every_x_steps = 10
 eval_every_x_steps = 5_000
@@ -92,24 +93,16 @@ def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_b
 
 train_dataloader, eval_dataloader, eval_mismatched_dataloader = create_dataloaders()
 
-# for batch in train_dataloader:
-#     print({k: v.shape for k, v in batch.items()})
-#     outputs = model(**batch)
-#     break
-
-
 metric = evaluate.load("glue", "mnli", trust_remote_code=True)
 
-# predictions = outputs.logits.detach().argmax(dim=-1)
-# metric.compute(predictions=predictions, references=batch["labels"])
-
 hyperparameters = {
-    "learning_rate": 2e-5,
+    "learning_rate": 4e-5,
     "num_epochs": 2,
-    "train_batch_size": train_batch_size,  # Actual batch size will this x 8
-    "eval_batch_size": eval_batch_size,  # Actual batch size will this x 8
+    "train_batch_size": train_batch_size,  # Actual batch size will this x devices
+    "eval_batch_size": eval_batch_size,  # Actual batch size will this x devices
     'gradient_accumulation_steps': 32,
     "seed": 42,
+    'num_warmup_steps':10_000,
 }
 
 
@@ -156,7 +149,7 @@ def training_function(model):
     # may change its length.
     lr_scheduler = get_linear_schedule_with_warmup(
         optimizer=optimizer,
-        num_warmup_steps=5_000,
+        num_warmup_steps=hyperparameters['num_warmup_steps'],
         num_training_steps=len(train_dataloader) * num_epochs,
     )
 
@@ -255,6 +248,14 @@ def training_function(model):
 
 
 training_function(model)
+
+## First successful run using max padding.
+# epoch 1: {'accuracy_validation_matched': 0.8935303107488538}
+# epoch 1: {'accuracy_validation_mismatched': 0.8980878763222132}
+# Removed shared tensor {'model.encoder.embed_tokens.weight', 'model.decoder.embed_tokens.weight'} while saving. This should be OK, but check by verifying that you don't receive any warning while reloading
+# 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 98176/98176 [20:00:54<00:00,  1.36it/s]
+# (.lvenv) lachlan@DESKTOPBESTTOP:/mnt/c/Users/lachl/PycharmProjects/bart-large-mnli-recreation$ accelerate launch ./S3_training.py
+
 
 # from accelerate import notebook_launcher
 #
