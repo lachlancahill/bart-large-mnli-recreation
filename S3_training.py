@@ -38,7 +38,7 @@ def get_tensorboard_writer_dir():
 
     proj_dir = f"{run_dir}/{now_folder}"
 
-    os.makedirs( proj_dir, exist_ok=True)
+    os.makedirs(proj_dir, exist_ok=True)
     # log_dir = f"{run_dir}/{now_folder}/logs"
     #
     # os.makedirs(log_dir, exist_ok=True)
@@ -66,9 +66,12 @@ tokenized_datasets.set_format("torch")
 model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=3)
 
 train_batch_size = 8
-eval_batch_size = 64
-eval_every_x_steps = 10_000
-save_every_x_steps = eval_every_x_steps
+eval_batch_size = 32
+
+log_every_x_steps = 10
+eval_every_x_steps = 5_000
+save_every_x_steps = 10_000
+
 
 def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
     train_dataloader = DataLoader(
@@ -103,7 +106,7 @@ hyperparameters = {
     "num_epochs": 2,
     "train_batch_size": train_batch_size,  # Actual batch size will this x 8
     "eval_batch_size": eval_batch_size,  # Actual batch size will this x 8
-    'gradient_accumulation_steps': 2,
+    'gradient_accumulation_steps': 32,
     "seed": 42,
 }
 
@@ -151,8 +154,8 @@ def training_function(model):
     # may change its length.
     lr_scheduler = get_linear_schedule_with_warmup(
         optimizer=optimizer,
-        num_warmup_steps=100,
-        num_training_steps=(len(train_dataloader) // gradient_accumulation_steps) * num_epochs,
+        num_warmup_steps=5_000,
+        num_training_steps=len(train_dataloader) * num_epochs,
     )
 
     # Register the scheduler
@@ -170,7 +173,7 @@ def training_function(model):
         all_predictions = []
         all_labels = []
 
-        for step, batch in enumerate(eval_dataloader):
+        for step, batch in enumerate(evaluation_dataloader_arg):
             with torch.no_grad():
                 outputs = model(**batch)
             predictions = outputs.logits.argmax(dim=-1)
@@ -198,8 +201,11 @@ def training_function(model):
 
     # Now we train the model
 
+    train_dataloader_len = len(train_dataloader)
+
     for epoch in range(num_epochs):
         model.train()
+
         for step, batch in enumerate(train_dataloader):
             outputs = model(**batch)
             loss = outputs.loss
@@ -207,26 +213,37 @@ def training_function(model):
 
             accelerator.backward(loss)
 
-            if (step + 1) % gradient_accumulation_steps == 0:
+            progress_bar.update(1)
 
-                # Log the loss as at the gradient accumulation step.
-                accelerator.log({"train_loss": loss}, step=progress_bar.n)
+            master_step_no = progress_bar.n
 
+            step_plus_1 = step + 1
+
+            lr_scheduler.step()
+
+            if step_plus_1 % gradient_accumulation_steps == 0 or step_plus_1 == train_dataloader_len:
                 optimizer.step()
-                lr_scheduler.step()
                 optimizer.zero_grad()
 
-            if (progress_bar.n + 1) % eval_every_x_steps == 0:
+            if master_step_no % log_every_x_steps == 0:
+                # Log the loss as at the gradient accumulation step.
+
+                current_lr = float(lr_scheduler.get_last_lr()[0])
+
+                accelerator.log(
+                    {
+                        "train_loss": loss,
+                        'lr': current_lr,
+                    },
+                    step=progress_bar.n)
+
+            if (progress_bar.n) % eval_every_x_steps == 0:
                 evaluate(model, eval_dataloader, 'validation_matched')
                 evaluate(model, eval_mismatched_dataloader, 'validation_mismatched')
                 model.train()
 
-
-            if (progress_bar.n + 1) % save_every_x_steps == 0:
+            if (progress_bar.n) % save_every_x_steps == 0:
                 accelerator.save_state()
-
-            progress_bar.update(1)
-
 
     evaluate(model, eval_dataloader, 'validation_matched')
     evaluate(model, eval_mismatched_dataloader, 'validation_mismatched')
