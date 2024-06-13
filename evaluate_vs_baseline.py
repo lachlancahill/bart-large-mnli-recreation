@@ -97,17 +97,31 @@ plt.style.use('ggplot')
 # Plotting
 fig, ax = plt.subplots(figsize=(10, 6))
 width = 0.35  # the width of the bars
-ind = [0, 1, 2]  # the x locations for the groups
+ind = [
+    # 0,
+    1,
+    2
+]  # the x locations for the groups
 
-p1 = ax.bar(ind, results_df['Train Accuracy'], width, bottom=0)
+# p1 = ax.bar(ind, results_df['Train Accuracy'], width, bottom=0)
 p2 = ax.bar([p + width for p in ind], results_df['Validation Matched Accuracy'], width, bottom=0)
 p3 = ax.bar([p + 2 * width for p in ind], results_df['Validation Mismatched Accuracy'], width, bottom=0)
 
 ax.set_title('Model Performance Comparison')
 ax.set_xticks([p + width for p in ind])
-ax.set_xticklabels(('Train', 'Validation Matched', 'Validation Mismatched'))
+ax.set_xticklabels((
+    # 'Train',
+    'Validation Matched',
+    'Validation Mismatched'
+))
 
-ax.legend((p1[0], p2[0], p3[0]), ('BART-large-MNLI', 'Custom BART'))
+ax.legend(
+    (
+        # p1[0],
+        p2[0],
+        p3[0])
+    ,
+    ('BART-large-MNLI', 'Custom BART'))
 ax.autoscale_view()
 
 plt.show()
