@@ -100,9 +100,6 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
 
     tokenized_datasets.set_format("torch")
 
-    log_every_x_steps = 10
-    eval_every_x_steps = 5_000
-    save_every_x_steps = 10_000
 
     def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
         train_dataloader = DataLoader(
@@ -185,9 +182,16 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         # Save the starting state
         accelerator.save_state()
 
+        total_steps = num_epochs * len(train_dataloader)
+
         # Instantiate a progress bar to keep track of training. Note that we only enable it on the main
         # process to avoid having 8 progress bars.
-        progress_bar = tqdm(range(num_epochs * len(train_dataloader)), disable=not accelerator.is_main_process)
+        progress_bar = tqdm(range(total_steps), disable=not accelerator.is_main_process)
+
+        # The hardcoded numbers are the total number of times through the training run that we want each to happen.
+        log_every_x_steps = 500 // total_steps
+        eval_every_x_steps = 20 // total_steps
+        save_every_x_steps = 20 // total_steps
 
         def evaluate(model, evaluation_dataloader_arg, dataset_name):
             model.eval()
@@ -223,7 +227,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         # Now we train the model
 
         train_dataloader_len = len(train_dataloader)
-        losses_cache = torch.tensor([], device=accelerator.device)
+        losses_cache = []
 
         for epoch in range(num_epochs):
             model.train()
@@ -247,14 +251,15 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
                     optimizer.step()
                     optimizer.zero_grad()
 
-                losses_cache = torch.cat((losses_cache, loss.unsqueeze(0)))
+                # Append the loss to the list
+                losses_cache.append(loss.item())
                 if master_step_no % log_every_x_steps == 0:
                     # Log the loss as at the gradient accumulation step.
 
                     current_lr = float(lr_scheduler.get_last_lr()[0])
 
-                    average_loss = losses_cache.mean()
-                    losses_cache = torch.tensor([], device=accelerator.device) # clear cache
+                    average_loss = torch.tensor(losses_cache, device=accelerator.device).mean()
+                    losses_cache = []  # Clear the cache
 
                     accelerator.log(
                         {
