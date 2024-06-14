@@ -32,9 +32,9 @@ if __name__ == '__main__':
         max_length=max_seq_length,
     )
 
-    learning_rate = 3e-5
+    learning_rate = 4e-5
 
-    train_batch_size = 8
+    train_batch_size = 4
 
     num_epochs = 3
 
