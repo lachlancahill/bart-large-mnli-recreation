@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
 
     tokenizer = T5TokenizerFast.from_pretrained(hf_repo)
-    max_seq_length = tokenizer.model_max_length
+    max_seq_length = 2048
 
     # device = 'cuda'
 
@@ -33,7 +33,7 @@ if __name__ == '__main__':
 
     learning_rate = 3e-5
 
-    train_batch_size = 8
+    train_batch_size = 4
 
     num_epochs = 3
 

@@ -12,7 +12,7 @@ if __name__ == '__main__':
     runs_directory = 'runs'
 
     tokenizer = T5TokenizerFast.from_pretrained(hf_repo)
-    max_seq_length = tokenizer.model_max_length
+    max_seq_length = 2048
 
     device = 'cuda'
 

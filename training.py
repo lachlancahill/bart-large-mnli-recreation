@@ -223,7 +223,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         # Now we train the model
 
         train_dataloader_len = len(train_dataloader)
-        losses_cache = []
+        losses_cache = torch.tensor([], device=accelerator.device)
 
         for epoch in range(num_epochs):
             model.train()
@@ -247,16 +247,14 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
                     optimizer.step()
                     optimizer.zero_grad()
 
-                losses_cache.append(loss)
+                losses_cache = torch.cat((losses_cache, loss.unsqueeze(0)))
                 if master_step_no % log_every_x_steps == 0:
                     # Log the loss as at the gradient accumulation step.
 
                     current_lr = float(lr_scheduler.get_last_lr()[0])
 
-                    import numpy
-
-                    average_loss = numpy.mean(losses_cache)
-                    losses_cache = [] # clear cache
+                    average_loss = losses_cache.mean()
+                    losses_cache = torch.tensor([], device=accelerator.device) # clear cache
 
                     accelerator.log(
                         {
