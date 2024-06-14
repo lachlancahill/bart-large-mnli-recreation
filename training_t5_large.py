@@ -8,6 +8,7 @@ if __name__ == '__main__':
 
     info_hyperparameters = {
         'hf_repo': hf_repo,
+        'precision': 'bfloat16'
     }
 
     runs_directory = 'runs'
@@ -16,13 +17,13 @@ if __name__ == '__main__':
     tokenizer = T5TokenizerFast.from_pretrained(hf_repo)
     max_seq_length = 2048
 
-    # device = 'cuda'
+    device = 'cuda'
 
     model = T5ForSequenceClassification.from_pretrained(
         hf_repo,
         num_labels=3,
-        # device_map=device,
-        # torch_dtype=torch.bfloat16
+        device_map=device,
+        torch_dtype=torch.bfloat16
     )
 
     tokenizer_kwargs = dict(
@@ -33,7 +34,7 @@ if __name__ == '__main__':
 
     learning_rate = 3e-5
 
-    train_batch_size = 4
+    train_batch_size = 8
 
     num_epochs = 3
 

@@ -7,6 +7,7 @@ hf_repo = 'google-t5/t5-3b'
 if __name__ == '__main__':
     info_hyperparameters = {
         'hf_repo': hf_repo,
+        'precision': 'bfloat16'
     }
 
     runs_directory = 'runs'
