@@ -53,11 +53,10 @@ def get_tensorboard_writer_dir():
 
 proj_dir = get_tensorboard_writer_dir()
 
-train_batch_size = 8
-eval_batch_size = 8
+train_batch_size = 4
+eval_batch_size = train_batch_size
 
 def tokenize_function(examples):
-    # TODO: Figure out a way to actually pad using something other than max_length. Using 'longest' throws errors during evaluation
     # TODO: Try batch sizes of just 1, with no padding, then just ues gradient accumulation steps. See if the inefficiencies of not using batches are offset by the reduced computation for padded sequences.
     outputs = tokenizer(examples["premise"], examples["hypothesis"], truncation='only_first', padding="longest",
                         max_length=1024)  # TODO: make max length dynamic based on model.
@@ -96,13 +95,13 @@ train_dataloader, eval_dataloader, eval_mismatched_dataloader = create_dataloade
 metric = evaluate.load("glue", "mnli", trust_remote_code=True)
 
 hyperparameters = {
-    "learning_rate": 4e-5,
+    "learning_rate": 5e-5,
+    'num_warmup_steps':12_500,
     "num_epochs": 2,
     "train_batch_size": train_batch_size,  # Actual batch size will this x devices
     "eval_batch_size": eval_batch_size,  # Actual batch size will this x devices
     'gradient_accumulation_steps': 32,
     "seed": 42,
-    'num_warmup_steps':10_000,
 }
 
 
@@ -255,6 +254,13 @@ training_function(model)
 # Removed shared tensor {'model.encoder.embed_tokens.weight', 'model.decoder.embed_tokens.weight'} while saving. This should be OK, but check by verifying that you don't receive any warning while reloading
 # 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 98176/98176 [20:00:54<00:00,  1.36it/s]
 # (.lvenv) lachlan@DESKTOPBESTTOP:/mnt/c/Users/lachl/PycharmProjects/bart-large-mnli-recreation$ accelerate launch ./S3_training.py
+
+
+# Second run much faster. Still batch size 8:
+# 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 98176/98176 [3:46:53<00:00, 10.55it/s]epoch 1: {'accuracy_validation_matched': 0.8975038206826287}
+# epoch 1: {'accuracy_validation_mismatched': 0.898393002441009}
+
+
 
 
 # from accelerate import notebook_launcher
