@@ -19,7 +19,8 @@ model_pretrained = BartForSequenceClassification.from_pretrained('facebook/bart-
 
 # Load your custom-trained model
 config = AutoConfig.from_pretrained('facebook/bart-large-mnli')
-model_custom = BartForSequenceClassification.from_pretrained('./runs/2024-06-13--11-52-22/checkpoints/checkpoint_9', config=config)
+model_custom = BartForSequenceClassification.from_pretrained(
+    'runs/facebook/bart-large/2024-06-13--11-52-22/checkpoints/checkpoint_9', config=config)
 
 # Load the dataset
 dataset = load_dataset('glue', 'mnli')

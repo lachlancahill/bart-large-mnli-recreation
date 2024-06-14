@@ -188,10 +188,16 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         # process to avoid having 8 progress bars.
         progress_bar = tqdm(range(total_steps), disable=not accelerator.is_main_process)
 
+        print(f"INFO: {total_steps=}")
+
         # The hardcoded numbers are the total number of times through the training run that we want each to happen.
-        log_every_x_steps = 500 // total_steps
-        eval_every_x_steps = 20 // total_steps
-        save_every_x_steps = 20 // total_steps
+        log_every_x_steps =  total_steps // 1000
+        eval_every_x_steps = total_steps // 20
+        save_every_x_steps = total_steps // 20
+
+        print(f"INFO: {log_every_x_steps=}")
+        print(f"INFO: {eval_every_x_steps=}")
+        print(f"INFO: {save_every_x_steps=}")
 
         def evaluate(model, evaluation_dataloader_arg, dataset_name):
             model.eval()
@@ -268,12 +274,12 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
                         },
                         step=progress_bar.n)
 
-                if (progress_bar.n) % eval_every_x_steps == 0:
+                if master_step_no % eval_every_x_steps == 0:
                     evaluate(model, eval_dataloader, 'validation_matched')
                     evaluate(model, eval_mismatched_dataloader, 'validation_mismatched')
                     model.train()
 
-                if (progress_bar.n) % save_every_x_steps == 0:
+                if master_step_no % save_every_x_steps == 0:
                     accelerator.save_state()
 
         evaluate(model, eval_dataloader, 'validation_matched')
