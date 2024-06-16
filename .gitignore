@@ -4,4 +4,8 @@
 /.idea/
 /runs/
 /runs_archive/
+/exploration/notebooks/images/
 
+
+zzzzz*
+*-checkpoint.ipynb
