@@ -2,7 +2,7 @@ import datetime
 import os.path
 
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
 from accelerate import Accelerator
 from datasets import load_dataset
@@ -72,7 +72,8 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         outputs = tokenizer(examples["premise"], examples["hypothesis"], **tokenizer_kwargs)  # TODO: make max length dynamic based on model.
         return outputs
 
-    tokenized_datasets_original_labels = raw_datasets.map(tokenize_function, batched=True, num_proc=8,
+    tokenized_datasets_original_labels = raw_datasets.map(tokenize_function, batched=True,
+                                                          # num_proc=8,
                                           remove_columns=["idx", "premise", "hypothesis"], batch_size=train_batch_size)
     tokenized_datasets_original_labels = tokenized_datasets_original_labels.rename_column("label", "labels")
 
@@ -104,7 +105,8 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         examples['labels_remapped'] = [remap_dict[i] for i in examples['labels']]
         return examples
 
-    tokenized_datasets = tokenized_datasets_original_labels.map(remap_labels_for_consistency, batched=True, num_proc=8,
+    tokenized_datasets = tokenized_datasets_original_labels.map(remap_labels_for_consistency, batched=True,
+                                                                # num_proc=8,
                                                                 batch_size=train_batch_size,
                                                                 remove_columns=["labels"]
                                                                 ).rename_column("labels_remapped", "labels")
@@ -214,8 +216,8 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
 
         # The hardcoded numbers are the total number of times through the training run that we want each to happen.
         log_every_x_steps =  total_steps // 1000
-        eval_every_x_steps = total_steps // 40
-        save_every_x_steps = total_steps // 20
+        eval_every_x_steps = total_steps // 60
+        save_every_x_steps = total_steps // 30
 
         print(f"INFO: {log_every_x_steps=}")
         print(f"INFO: {eval_every_x_steps=}")
@@ -245,9 +247,8 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
             eval_metric = metric.compute(predictions=all_predictions, references=all_labels)
 
             eval_metric = {f"{k}_{dataset_name}": v for k, v in eval_metric.items()}
-
             # Use accelerator.print to print only on the main process.
-            accelerator.print(f"epoch {epoch}:", eval_metric)
+            accelerator.print(f"{datetime.datetime.now()} epoch {epoch}:", eval_metric)
 
             # Log the loss as at the gradient accumulation step.
             accelerator.log(eval_metric, step=progress_bar.n)
