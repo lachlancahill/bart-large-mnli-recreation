@@ -22,8 +22,17 @@ raw_datasets = load_dataset("glue", "mnli")
 
 print(f'{raw_datasets=}')
 
-def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, train_batch_size=4, learning_rate=2e-5,
-                        num_warmup_steps=5_000, gradient_accumulation_steps=32, num_epochs=2, info_hyperparameters=None):
+def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, train_effective_batch_size=None,
+                        train_batch_size=4, learning_rate=1e-4, num_warmup_steps=None, num_epochs=2,
+                        info_hyperparameters=None):
+
+    if train_effective_batch_size is None:
+        train_effective_batch_size = train_batch_size
+
+    gradient_accumulation_steps = train_effective_batch_size // train_batch_size
+
+    if num_warmup_steps is None:
+        num_warmup_steps = 10000 * gradient_accumulation_steps # ensures warn up steps aligns to effective batch steps
 
     if info_hyperparameters is None:
         info_hyperparameters = {}
@@ -63,7 +72,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         outputs = tokenizer(examples["premise"], examples["hypothesis"], **tokenizer_kwargs)  # TODO: make max length dynamic based on model.
         return outputs
 
-    tokenized_datasets_original_labels = raw_datasets.map(tokenize_function, batched=True,
+    tokenized_datasets_original_labels = raw_datasets.map(tokenize_function, batched=True, num_proc=8,
                                           remove_columns=["idx", "premise", "hypothesis"], batch_size=train_batch_size)
     tokenized_datasets_original_labels = tokenized_datasets_original_labels.rename_column("label", "labels")
 
@@ -95,8 +104,10 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         examples['labels_remapped'] = [remap_dict[i] for i in examples['labels']]
         return examples
 
-    tokenized_datasets = tokenized_datasets_original_labels.map(remap_labels_for_consistency, batched=True, batch_size=train_batch_size,
-                                               remove_columns=["labels"]).rename_column("labels_remapped", "labels")
+    tokenized_datasets = tokenized_datasets_original_labels.map(remap_labels_for_consistency, batched=True, num_proc=8,
+                                                                batch_size=train_batch_size,
+                                                                remove_columns=["labels"]
+                                                                ).rename_column("labels_remapped", "labels")
 
     tokenized_datasets.set_format("torch")
 
@@ -159,6 +170,19 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         # Instantiate optimizer
         optimizer = AdamW(params=model.parameters(), lr=hyperparameters["learning_rate"])
 
+
+        # modify model config so it can be easily reloaded
+
+        id2label = {0: 'contradiction', 1: 'neutral', 2: 'entailment'}
+        model.config.id2label = id2label
+        model.config.label2id = {v: k for k, v in id2label.items()}
+        model.config.max_length = tokenizer_kwargs['max_length']
+
+        # Save the starting state
+        config_dir = f"{proj_dir}/config_checkpoint"
+        os.makedirs(config_dir, exist_ok=True)
+        model.save_pretrained(config_dir)
+
         # Prepare everything
         # There is no specific order to remember, we just need to unpack the objects in the same order we gave them to the
         # prepare method.
@@ -179,8 +203,6 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         # Register the scheduler
         # accelerator.register_for_checkpointing(lr_scheduler)
 
-        # Save the starting state
-        accelerator.save_state()
 
         total_steps = num_epochs * len(train_dataloader)
 
@@ -192,7 +214,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
 
         # The hardcoded numbers are the total number of times through the training run that we want each to happen.
         log_every_x_steps =  total_steps // 1000
-        eval_every_x_steps = total_steps // 20
+        eval_every_x_steps = total_steps // 40
         save_every_x_steps = total_steps // 20
 
         print(f"INFO: {log_every_x_steps=}")
