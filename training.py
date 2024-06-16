@@ -178,7 +178,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         id2label = {0: 'contradiction', 1: 'neutral', 2: 'entailment'}
         model.config.id2label = id2label
         model.config.label2id = {v: k for k, v in id2label.items()}
-        model.config.max_length = tokenizer_kwargs['max_length']
+        model.config.max_length = tokenizer_kwargs['max_length'] #TODO: Make this an argument to this training function
 
         # Save the starting state
         config_dir = f"{proj_dir}/config_checkpoint"

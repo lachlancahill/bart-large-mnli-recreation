@@ -1,26 +1,33 @@
 import tqdm
-from transformers import BartForSequenceClassification, AutoTokenizer, AutoConfig, BartTokenizer
+from transformers import BartForSequenceClassification, BartTokenizer, AutoTokenizer, AutoConfig, AutoModelForSequenceClassification
 from datasets import load_dataset
 import torch
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score
 import pandas as pd
-import matplotlib.pyplot as plt
 from torch.utils.data.dataloader import default_collate
 
 
 eval_training_data = True
 
+# parameters relating to the custom model we are testing.
+original_id = 'google-t5/t5-large'
+config_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-16--15-46-56\config_checkpoint'
+checkpoint_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-16--15-46-56\checkpoints\checkpoint_2'
+max_length = 2048
+
+
 device = torch.device('cuda:0')
 
 # Load Facebook's pre-trained BART-large-MNLI model
-tokenizer:BartTokenizer = AutoTokenizer.from_pretrained('facebook/bart-large-mnli')
-model_pretrained = BartForSequenceClassification.from_pretrained('facebook/bart-large-mnli')
+bart_id = 'facebook/bart-large-mnli'
+tokenizer_pretrained = BartTokenizer.from_pretrained(bart_id)
+model_pretrained = BartForSequenceClassification.from_pretrained(bart_id, device_map=device, torch_dtype=torch.bfloat16)
 
 # Load your custom-trained model
-config = AutoConfig.from_pretrained('facebook/bart-large-mnli')
-model_custom = BartForSequenceClassification.from_pretrained(
-    'runs/facebook/bart-large/2024-06-13--11-52-22/checkpoints/checkpoint_9', config=config)
+config = AutoConfig.from_pretrained(config_path)
+tokenizer_custom = AutoTokenizer.from_pretrained(original_id)
+model_custom = AutoModelForSequenceClassification.from_pretrained(checkpoint_path, config=config, device_map=device, torch_dtype=torch.bfloat16)
 
 # Load the dataset
 dataset = load_dataset('glue', 'mnli')
@@ -31,14 +38,14 @@ validation_mismatched = dataset['validation_mismatched']
 
 eval_batch_size = 8
 
-def tokenize_function(examples):
-    tok_result = tokenizer(examples["premise"], examples["hypothesis"], truncation='only_first', padding="longest", max_length=1024)
+def tokenize_function_pretrained(examples):
+    tok_result = tokenizer_pretrained(examples["premise"], examples["hypothesis"], truncation='only_first', padding="longest", max_length=1024)
     return tok_result
 
-train_dataset = train_dataset.map(tokenize_function, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"]).rename_column("label", "labels")
-validation_matched = validation_matched.map(tokenize_function, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"]).rename_column("label", "labels")
-validation_mismatched = validation_mismatched.map(tokenize_function, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"]).rename_column("label", "labels")
 
+def tokenize_function_custom(examples):
+    tok_result = tokenizer_custom(examples["premise"], examples["hypothesis"], truncation='only_first', padding="longest", max_length=max_length)
+    return tok_result
 
 
 def remap_labels_for_pretrained(examples):
@@ -64,22 +71,31 @@ def remap_labels_for_pretrained(examples):
         1: 1,
         2: 0,
     }
-    examples['labels_remapped'] = [remap_dict[i] for i in examples['labels']]
+    examples['labels'] = [remap_dict[i] for i in examples['label']]
     return examples
 
 
-remapped_train_dataset = train_dataset.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["labels"]).rename_column("labels_remapped", "labels")
-remapped_validation_matched = validation_matched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["labels"]).rename_column("labels_remapped", "labels")
-remapped_validation_mismatched = validation_mismatched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["labels"]).rename_column("labels_remapped", "labels")
+remapped_train_dataset = train_dataset.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+remapped_validation_matched = validation_matched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+remapped_validation_mismatched = validation_mismatched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
 
 
-train_dataset.set_format('torch')
-validation_matched.set_format('torch')
-validation_mismatched.set_format('torch')
+train_dataset_pretrained = remapped_train_dataset.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_matched_pretrained = remapped_validation_matched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_mismatched_pretrained = remapped_validation_mismatched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
 
-remapped_train_dataset.set_format('torch')
-remapped_validation_matched.set_format('torch')
-remapped_validation_mismatched.set_format('torch')
+train_dataset_custom = remapped_train_dataset.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_matched_custom = remapped_validation_matched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_mismatched_custom = remapped_validation_mismatched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+
+
+train_dataset_pretrained.set_format('torch')
+validation_matched_pretrained.set_format('torch')
+validation_mismatched_pretrained.set_format('torch')
+
+train_dataset_custom.set_format('torch')
+validation_matched_custom.set_format('torch')
+validation_mismatched_custom.set_format('torch')
 
 def collate_fn(batch):
     default_collated_batch = default_collate(batch)
@@ -87,14 +103,14 @@ def collate_fn(batch):
     return correct_device_batch
 
 
-train_loader = DataLoader(train_dataset, batch_size=eval_batch_size, collate_fn=collate_fn)
-validation_matched_loader = DataLoader(validation_matched, batch_size=eval_batch_size, collate_fn=collate_fn)
-validation_mismatched_loader = DataLoader(validation_mismatched, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_train_dataset_pretrained = DataLoader(train_dataset_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_matched_pretrained = DataLoader(validation_matched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_mismatched_pretrained = DataLoader(validation_mismatched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
 
 
-remapped_train_loader = DataLoader(remapped_train_dataset, batch_size=eval_batch_size, collate_fn=collate_fn)
-remapped_validation_matched_loader = DataLoader(remapped_validation_matched, batch_size=eval_batch_size, collate_fn=collate_fn)
-remapped_validation_mismatched_loader = DataLoader(remapped_validation_mismatched, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_train_dataset_custom = DataLoader(train_dataset_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_matched_custom = DataLoader(validation_matched_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_mismatched_custom = DataLoader(validation_mismatched_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
 
 
 def evaluate_model(model, dataloader):
@@ -111,15 +127,11 @@ def evaluate_model(model, dataloader):
     accuracy = accuracy_score(references, predictions)
     return accuracy
 
-
-model_pretrained.to(device)
-model_custom.to(device)
-
 # Evaluate on different splits
-accuracy_pretrained_val_matched = evaluate_model(model_pretrained, remapped_validation_matched_loader)
-accuracy_custom_val_matched = evaluate_model(model_custom, validation_matched_loader)
-accuracy_pretrained_val_mismatched = evaluate_model(model_pretrained, remapped_validation_mismatched_loader)
-accuracy_custom_val_mismatched = evaluate_model(model_custom, validation_mismatched_loader)
+accuracy_pretrained_val_matched = evaluate_model(model_pretrained, loader_validation_matched_pretrained)
+accuracy_custom_val_matched = evaluate_model(model_custom, loader_validation_matched_custom)
+accuracy_pretrained_val_mismatched = evaluate_model(model_pretrained, loader_validation_mismatched_pretrained)
+accuracy_custom_val_mismatched = evaluate_model(model_custom, loader_validation_mismatched_custom)
 
 # Assuming you have the accuracy values stored as mentioned in the previous steps
 data = {
@@ -129,8 +141,8 @@ data = {
 }
 
 if eval_training_data:
-    accuracy_pretrained_train = evaluate_model(model_pretrained, remapped_train_loader)
-    accuracy_custom_train = evaluate_model(model_custom, train_loader)
+    accuracy_pretrained_train = evaluate_model(model_pretrained, loader_train_dataset_pretrained)
+    accuracy_custom_train = evaluate_model(model_custom, loader_train_dataset_custom)
     data['Train Accuracy'] = [accuracy_pretrained_train, accuracy_custom_train]
 
 results_df = pd.DataFrame(data)
