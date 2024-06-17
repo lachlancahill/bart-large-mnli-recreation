@@ -21,11 +21,7 @@ from accelerate.utils import ProjectConfiguration
 
 raw_datasets = load_dataset("glue", "mnli")
 
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-
 print(f'{raw_datasets=}')
-
-raw_datasets = raw_datasets.filter(function=lambda x: x['label'] != -1)
 
 def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, train_effective_batch_size=None,
                         train_batch_size=4, learning_rate=1e-4, num_warmup_steps=None, num_epochs=2,
@@ -80,7 +76,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
     tokenized_datasets_original_labels = raw_datasets.map(tokenize_function, batched=True,
                                                           # num_proc=8,
                                           remove_columns=["idx", "premise", "hypothesis"], batch_size=train_batch_size)
-    tokenized_datasets_original_labels = tokenized_datasets_original_labels
+    tokenized_datasets_original_labels = tokenized_datasets_original_labels.rename_column("label", "labels")
 
 
     def remap_labels_for_consistency(examples):
@@ -107,14 +103,14 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
             1: 1,
             2: 0,
         }
-        examples['labels'] = [remap_dict[i] for i in examples['label']]
+        examples['labels_remapped'] = [remap_dict[i] for i in examples['labels']]
         return examples
 
     tokenized_datasets = tokenized_datasets_original_labels.map(remap_labels_for_consistency, batched=True,
                                                                 # num_proc=8,
                                                                 batch_size=train_batch_size,
-                                                                remove_columns=["label"]
-                                                                )
+                                                                remove_columns=["labels"]
+                                                                ).rename_column("labels_remapped", "labels")
 
     tokenized_datasets.set_format("torch")
 
@@ -266,6 +262,9 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
             model.train()
 
             for step, batch in enumerate(train_dataloader):
+                progress_bar.update(1)
+                if progress_bar.n < 171805:
+                    continue
 
                 try:
                     outputs = model(**batch)
@@ -282,7 +281,6 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
 
                 accelerator.backward(loss)
 
-                progress_bar.update(1)
 
                 master_step_no = progress_bar.n
 
@@ -351,20 +349,3 @@ if __name__ == '__main__':
         tokenizer_kwargs,
         train_batch_size=4,
     )
-
-## First successful run using max padding.
-# epoch 1: {'accuracy_validation_matched': 0.8935303107488538}
-# epoch 1: {'accuracy_validation_mismatched': 0.8980878763222132}
-# Removed shared tensor {'model.encoder.embed_tokens.weight', 'model.decoder.embed_tokens.weight'} while saving. This should be OK, but check by verifying that you don't receive any warning while reloading
-# 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 98176/98176 [20:00:54<00:00,  1.36it/s]
-# (.lvenv) lachlan@DESKTOPBESTTOP:/mnt/c/Users/lachl/PycharmProjects/bart-large-mnli-recreation$ accelerate launch ./training.py
-
-
-# Second run much faster. Still batch size 8:
-# 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 98176/98176 [3:46:53<00:00, 10.55it/s]epoch 1: {'accuracy_validation_matched': 0.8975038206826287}
-# epoch 1: {'accuracy_validation_mismatched': 0.898393002441009}
-
-
-# from accelerate import notebook_launcher
-#
-# notebook_launcher(training_function, (model,), num_processes=2)

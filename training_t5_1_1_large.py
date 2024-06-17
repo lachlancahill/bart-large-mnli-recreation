@@ -2,7 +2,7 @@ from training import train_model_on_mnli
 from transformers import T5ForSequenceClassification, T5TokenizerFast
 import torch
 
-hf_repo = 'google-t5/t5-large'
+hf_repo = 'google/t5-v1_1-large'
 
 if __name__ == '__main__':
 
@@ -16,7 +16,6 @@ if __name__ == '__main__':
     # Todo: Replace this with custom tokenizer class, adding a separator token, and replace build_inputs_with_special_tokens
     tokenizer = T5TokenizerFast.from_pretrained(hf_repo)
     max_seq_length = 512
-
 
     model = T5ForSequenceClassification.from_pretrained(
         hf_repo,
