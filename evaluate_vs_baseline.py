@@ -12,9 +12,9 @@ eval_training_data = True
 
 # parameters relating to the custom model we are testing.
 original_id = 'google-t5/t5-large'
-config_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-16--15-46-56\config_checkpoint'
-checkpoint_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-16--15-46-56\checkpoints\checkpoint_2'
-max_length = 2048
+config_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-17--17-32-44\config_checkpoint'
+checkpoint_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-17--17-32-44\checkpoints\checkpoint_17'
+max_length = 512
 
 
 device = torch.device('cuda:0')
@@ -147,3 +147,5 @@ if eval_training_data:
 
 results_df = pd.DataFrame(data)
 print(results_df.to_string(), "\n")
+
+

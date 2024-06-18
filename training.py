@@ -277,8 +277,8 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
                         pickle.dump(batch, f)
                     raise e
 
-                loss = outputs.loss
-                loss = loss / gradient_accumulation_steps
+                loss_raw = outputs.loss
+                loss = loss_raw / gradient_accumulation_steps
 
                 accelerator.backward(loss)
 
@@ -295,7 +295,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
                     optimizer.zero_grad()
 
                 # Append the loss to the list
-                losses_cache.append(loss.item())
+                losses_cache.append(loss_raw.item())
                 if master_step_no % log_every_x_steps == 0:
                     # Log the loss as at the gradient accumulation step.
 
