@@ -31,7 +31,8 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
     gradient_accumulation_steps = train_effective_batch_size // train_batch_size
 
     if num_warmup_steps is None:
-        num_warmup_steps = 20_000 # ensures warn up steps aligns to effective batch steps
+        total_steps = len(input_datasets[train_name]) // train_batch_size
+        num_warmup_steps = total_steps // 10 # 1/10th of the total steps should be spent on warm up.
 
     if info_hyperparameters is None:
         info_hyperparameters = {}
@@ -141,6 +142,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         # modify model config so it can be easily reloaded
 
         id2label = {0: 'contradiction', 1: 'neutral', 2: 'entailment'}
+        # TODO: Address the warning saying this needs to be in a generation config.
         model.config.id2label = id2label
         model.config.label2id = {v: k for k, v in id2label.items()}
 
@@ -221,6 +223,9 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
         train_dataloader_len = len(train_dataloader)
         losses_cache = []
+
+        # TODO: First train just the classification head by freezing all other parameters, then unfreeze and
+        #  train the full model.
 
         for epoch in range(num_epochs):
             model.train()
