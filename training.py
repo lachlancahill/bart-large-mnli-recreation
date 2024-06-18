@@ -1,15 +1,12 @@
 import datetime
 import os.path
 import pickle
-
+from config import random_seed
 import torch
 from torch.utils.data import DataLoader
 
 from accelerate import Accelerator
-from datasets import load_dataset
 from transformers import (
-    AutoModelForSequenceClassification,
-    AutoTokenizer,
     get_linear_schedule_with_warmup,
     set_seed,
 )
@@ -19,20 +16,17 @@ from torch.optim import AdamW
 import evaluate
 from accelerate.utils import ProjectConfiguration
 
-raw_datasets = load_dataset("glue", "mnli")
-
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
-print(f'{raw_datasets=}')
 
-raw_datasets = raw_datasets.filter(function=lambda x: x['label'] != -1)
 
-def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, train_effective_batch_size=None,
-                        train_batch_size=4, learning_rate=1e-4, num_warmup_steps=None, num_epochs=2,
-                        info_hyperparameters=None):
+def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
+                validation_names=None, train_effective_batch_size=256, train_batch_size=4, learning_rate=1e-4,
+                num_warmup_steps=None, num_epochs=2, info_hyperparameters=None):
 
-    if train_effective_batch_size is None:
-        train_effective_batch_size = train_batch_size
+    if validation_names is None:
+        validation_names = [c for c in input_datasets.keys() if c != 'train']
+        print(f"INFO: {validation_names=}")
 
     gradient_accumulation_steps = train_effective_batch_size // train_batch_size
 
@@ -77,61 +71,27 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         outputs = tokenizer(examples["premise"], examples["hypothesis"], **tokenizer_kwargs)  # TODO: make max length dynamic based on model.
         return outputs
 
-    tokenized_datasets_original_labels = raw_datasets.map(tokenize_function, batched=True,
+    tokenized_datasets = input_datasets.map(tokenize_function, batched=True,
                                                           # num_proc=8,
-                                          remove_columns=["idx", "premise", "hypothesis"], batch_size=train_batch_size)
-    tokenized_datasets_original_labels = tokenized_datasets_original_labels
+                                          remove_columns=["premise", "hypothesis"], batch_size=train_batch_size)
 
 
-    def remap_labels_for_consistency(examples):
-        """
-        For some reason, facebook's model reversed the label values
-        From their config.json:
-          {
-            "0": "contradiction",
-            "1": "neutral",
-            "2": "entailment"
-          },
-
-        The mnli dataset uses:
-            0 = Entailment
-            1 = Neutral
-            2 = Contradiction
-
-        As such, we need to remap
-        :return: remapped dataset
-        """
-        remap_dict = {
-            -1:-1, #TODO: these are unlabeled. Need to determine if these can be removed from original datasets.
-            0: 2,
-            1: 1,
-            2: 0,
-        }
-        examples['labels'] = [remap_dict[i] for i in examples['label']]
-        return examples
-
-    tokenized_datasets = tokenized_datasets_original_labels.map(remap_labels_for_consistency, batched=True,
-                                                                # num_proc=8,
-                                                                batch_size=train_batch_size,
-                                                                remove_columns=["label"]
-                                                                )
 
     tokenized_datasets.set_format("torch")
 
 
     def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
         train_dataloader = DataLoader(
-            # # TODO: Remove filter on training data.
-            # Subset(tokenized_datasets["train"], range(1_000)), shuffle=False, batch_size=train_batch_size
-            tokenized_datasets["train"], shuffle=False, batch_size=train_batch_size
+            tokenized_datasets[train_name], shuffle=False, batch_size=train_batch_size
         )
-        eval_matched_dataloader = DataLoader(
-            tokenized_datasets["validation_matched"], shuffle=False, batch_size=eval_batch_size
-        )
-        eval_mismatched_dataloader = DataLoader(
-            tokenized_datasets["validation_mismatched"], shuffle=False, batch_size=eval_batch_size
-        )
-        return train_dataloader, eval_matched_dataloader, eval_mismatched_dataloader
+
+        eval_dataloader_dict = {}
+
+        for eval_name in validation_names:
+            eval_dataloader_dict[eval_name] = DataLoader(
+                tokenized_datasets[eval_name], shuffle=False, batch_size=eval_batch_size
+            )
+        return train_dataloader, eval_dataloader_dict
 
     # train_dataloader, eval_dataloader, eval_mismatched_dataloader = create_dataloaders()
 
@@ -144,7 +104,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         "train_batch_size": train_batch_size,  # Actual batch size will this x devices
         "eval_batch_size": eval_batch_size,  # Actual batch size will this x devices
         'gradient_accumulation_steps': gradient_accumulation_steps,
-        "seed": 42,
+        "seed": random_seed,
         **info_hyperparameters,
     }
 
@@ -168,7 +128,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         #     datasets.utils.logging.set_verbosity_error()
         #     transformers.utils.logging.set_verbosity_error()
 
-        train_dataloader, eval_dataloader, eval_mismatched_dataloader = create_dataloaders(
+        train_dataloader, eval_dataloader_dict = create_dataloaders(
             train_batch_size=hyperparameters["train_batch_size"], eval_batch_size=hyperparameters["eval_batch_size"]
         )
         # The seed need to be set before we instantiate the model, as it will determine the random head.
@@ -192,9 +152,12 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         # Prepare everything
         # There is no specific order to remember, we just need to unpack the objects in the same order we gave them to the
         # prepare method.
-        model, optimizer, train_dataloader, eval_dataloader, eval_mismatched_dataloader = accelerator.prepare(
-            model, optimizer, train_dataloader, eval_dataloader, eval_mismatched_dataloader
+        model, optimizer, train_dataloader = accelerator.prepare(
+            model, optimizer, train_dataloader
         )
+
+        for eval_name in eval_dataloader_dict.keys():
+            eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])
 
         num_epochs = hyperparameters["num_epochs"]
         gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
@@ -208,8 +171,6 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
 
         # Register the scheduler
         # accelerator.register_for_checkpointing(lr_scheduler)
-
-
         total_steps = num_epochs * len(train_dataloader)
 
         # Instantiate a progress bar to keep track of training. Note that we only enable it on the main
@@ -228,7 +189,6 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
         print(f"INFO: {save_every_x_steps=}")
 
         def evaluate(model, evaluation_dataloader_arg, dataset_name):
-            model.eval()
             all_predictions = []
             all_labels = []
 
@@ -237,7 +197,7 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
                     outputs = model(**batch)
                 predictions = outputs.logits.argmax(dim=-1)
 
-                # We gather predictions and labels from the 8 TPUs to have them all.
+                # We gather predictions and labels from the GPUs.
                 all_predictions.append(accelerator.gather(predictions))
                 all_labels.append(accelerator.gather(batch["labels"]))
 
@@ -312,45 +272,24 @@ def train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, trai
                         step=progress_bar.n)
 
                 if master_step_no % eval_every_x_steps == 0:
-                    evaluate(model, eval_dataloader, 'validation_matched')
-                    evaluate(model, eval_mismatched_dataloader, 'validation_mismatched')
+                    model.eval()
+                    for eval_name in eval_dataloader_dict.keys():
+                        evaluate(model, eval_dataloader_dict[eval_name], eval_name)
                     model.train()
 
                 if master_step_no % save_every_x_steps == 0:
                     accelerator.save_state()
 
-        evaluate(model, eval_dataloader, 'validation_matched')
-        evaluate(model, eval_mismatched_dataloader, 'validation_mismatched')
+        model.eval()
+        # final evaluation completed.
+        for eval_name in eval_dataloader_dict.keys():
+            evaluate(model, eval_dataloader_dict[eval_name], eval_name)
 
         accelerator.save_state()
         accelerator.end_training()
 
     training_function(model)
 
-
-if __name__ == '__main__':
-    model_checkpoint = "facebook/bart-large"
-
-    tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
-    model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=3)
-
-    tokenizer_kwargs = dict(
-        truncation='only_first',
-        padding="longest",
-        max_length=tokenizer.model_max_length,
-    )
-
-    info_hyperparameters = {
-        'hf_repo': model_checkpoint,
-    }
-
-    train_model_on_mnli(
-        tokenizer,
-        model,
-        'runs',
-        tokenizer_kwargs,
-        train_batch_size=4,
-    )
 
 ## First successful run using max padding.
 # epoch 1: {'accuracy_validation_matched': 0.8935303107488538}

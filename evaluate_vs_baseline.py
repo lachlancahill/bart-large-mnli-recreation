@@ -149,3 +149,6 @@ results_df = pd.DataFrame(data)
 print(results_df.to_string(), "\n")
 
 
+#              Model  Validation Matched Accuracy  Validation Mismatched Accuracy  Train Accuracy
+# 0  BART-large-MNLI                     0.902089                        0.899817        0.963364
+# 1      Custom BART                     0.886704                        0.893714        0.982666

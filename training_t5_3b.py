@@ -1,4 +1,4 @@
-from training import train_model_on_mnli
+from training import train_model
 from transformers import T5ForSequenceClassification, T5TokenizerFast
 import torch
 
@@ -38,8 +38,8 @@ if __name__ == '__main__':
 
     gradient_accumulation_steps = 16 // train_batch_size
 
-    train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs, train_batch_size=train_batch_size,
-                        learning_rate=learning_rate,
-                        num_warmup_steps=num_warmup_steps, gradient_accumulation_steps=gradient_accumulation_steps,
-                        num_epochs=2,
-                        info_hyperparameters=info_hyperparameters)
+    train_model(tokenizer, model, runs_directory, tokenizer_kwargs, train_batch_size=train_batch_size,
+                learning_rate=learning_rate,
+                num_warmup_steps=num_warmup_steps, gradient_accumulation_steps=gradient_accumulation_steps,
+                num_epochs=2,
+                info_hyperparameters=info_hyperparameters)

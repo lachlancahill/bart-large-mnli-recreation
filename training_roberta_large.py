@@ -1,4 +1,4 @@
-from training import train_model_on_mnli
+from training import train_model
 from transformers import XLMRobertaForSequenceClassification, XLMRobertaTokenizerFast
 import torch
 
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     num_epochs = 3
 
 
-    train_model_on_mnli(tokenizer, model, runs_directory, tokenizer_kwargs,
-                        train_effective_batch_size=train_effective_batch_size, train_batch_size=train_batch_size,
-                        learning_rate=learning_rate, num_epochs=num_epochs,
-                        info_hyperparameters=info_hyperparameters)
+    train_model(tokenizer, model, runs_directory, tokenizer_kwargs,
+                train_effective_batch_size=train_effective_batch_size, train_batch_size=train_batch_size,
+                learning_rate=learning_rate, num_epochs=num_epochs,
+                info_hyperparameters=info_hyperparameters)
