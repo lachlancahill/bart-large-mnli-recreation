@@ -37,7 +37,7 @@ if __name__ == '__main__':
         validation_names=None, # figured out by the training function.
         train_effective_batch_size=256,
         train_batch_size=8,
-        learning_rate=1.e-4,
+        learning_rate=1.5e-4,
         num_warmup_steps=None,
         num_epochs=3,
         info_hyperparameters=info_hyperparameters,
