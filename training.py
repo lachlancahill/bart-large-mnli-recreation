@@ -31,7 +31,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
     gradient_accumulation_steps = train_effective_batch_size // train_batch_size
 
     if num_warmup_steps is None:
-        num_warmup_steps = 10000 # ensures warn up steps aligns to effective batch steps
+        num_warmup_steps = 20_000 # ensures warn up steps aligns to effective batch steps
 
     if info_hyperparameters is None:
         info_hyperparameters = {}
