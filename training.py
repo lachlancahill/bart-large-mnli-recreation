@@ -16,13 +16,12 @@ from torch.optim import AdamW
 import evaluate
 from accelerate.utils import ProjectConfiguration
 
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-
-
-
 def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
                 validation_names=None, train_effective_batch_size=256, train_batch_size=4, learning_rate=1e-4,
                 num_warmup_steps=None, num_epochs=2, info_hyperparameters=None):
+
+
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
     if validation_names is None:
         validation_names = [c for c in input_datasets.keys() if c != 'train']
@@ -83,14 +82,14 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
     def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
         train_dataloader = DataLoader(
-            tokenized_datasets[train_name], shuffle=False, batch_size=train_batch_size
+            tokenized_datasets[train_name], shuffle=False, batch_size=train_batch_size, drop_last=True
         )
 
         eval_dataloader_dict = {}
 
         for eval_name in validation_names:
             eval_dataloader_dict[eval_name] = DataLoader(
-                tokenized_datasets[eval_name], shuffle=False, batch_size=eval_batch_size
+                tokenized_datasets[eval_name], shuffle=False, batch_size=eval_batch_size, drop_last=True
             )
         return train_dataloader, eval_dataloader_dict
 
@@ -116,7 +115,12 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             project_dir=proj_dir,
             automatic_checkpoint_naming=True
         )
-        accelerator = Accelerator(log_with="tensorboard", project_config=config)
+        accelerator = Accelerator(
+            log_with="tensorboard",
+            project_config=config,
+            gradient_accumulation_steps=hyperparameters['gradient_accumulation_steps'],
+            # split_batches=True
+        )
 
         accelerator.init_trackers("logs", config=hyperparameters)
 
@@ -135,6 +139,8 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         # The seed need to be set before we instantiate the model, as it will determine the random head.
         set_seed(hyperparameters["seed"])
 
+        print(f"{accelerator.num_processes=}")
+
         # Instantiate optimizer
         optimizer = AdamW(params=model.parameters(), lr=hyperparameters["learning_rate"])
 
@@ -151,6 +157,11 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         os.makedirs(config_dir, exist_ok=True)
         model.save_pretrained(config_dir)
 
+        num_epochs = hyperparameters["num_epochs"]
+        gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
+        # Instantiate learning rate scheduler after preparing the training dataloader as the prepare method
+        # may change its length.
+
         # Prepare everything
         # There is no specific order to remember, we just need to unpack the objects in the same order we gave them to the
         # prepare method.
@@ -158,18 +169,15 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             model, optimizer, train_dataloader
         )
 
-        for eval_name in eval_dataloader_dict.keys():
-            eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])
-
-        num_epochs = hyperparameters["num_epochs"]
-        gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
-        # Instantiate learning rate scheduler after preparing the training dataloader as the prepare method
-        # may change its length.
         lr_scheduler = get_linear_schedule_with_warmup(
             optimizer=optimizer,
             num_warmup_steps=hyperparameters['num_warmup_steps'],
             num_training_steps=len(train_dataloader) * num_epochs,
         )
+
+
+        for eval_name in eval_dataloader_dict.keys():
+            eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])
 
         # Register the scheduler
         # accelerator.register_for_checkpointing(lr_scheduler)
@@ -177,7 +185,12 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
         # Instantiate a progress bar to keep track of training. Note that we only enable it on the main
         # process to avoid having 8 progress bars.
-        progress_bar = tqdm(range(total_steps), disable=not accelerator.is_main_process)
+        # progress_bar = tqdm(range(total_steps), disable=not accelerator.is_local_main_process)
+
+        print(f"{accelerator.is_local_main_process=}")
+        print(f"{accelerator.is_main_process=}")
+
+        progress_bar = tqdm(range(total_steps), disable=False)
 
         print(f"INFO: {total_steps=}")
 
@@ -190,13 +203,23 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         print(f"INFO: {eval_every_x_steps=}")
         print(f"INFO: {save_every_x_steps=}")
 
-        def evaluate(model, evaluation_dataloader_arg, dataset_name):
+        error_artifacts_dir = f'{proj_dir}/error_artifacts'
+
+        def evaluate_checkpoint(model, evaluation_dataloader_arg, dataset_name):
             all_predictions = []
             all_labels = []
 
             for step, batch in enumerate(evaluation_dataloader_arg):
-                with torch.no_grad():
-                    outputs = model(**batch)
+                try:
+                    with torch.no_grad():
+                        outputs = model(**batch)
+                except Exception as e:
+                    # if an error is encountered we want to examine the batch to determine if it is responsible.
+                    os.makedirs(error_artifacts_dir, exist_ok=True)
+                    with open(os.path.join(error_artifacts_dir, 'error_batch.pickle'), 'wb') as f:
+                        pickle.dump(batch, f)
+                    raise e
+
                 predictions = outputs.logits.argmax(dim=-1)
 
                 # We gather predictions and labels from the GPUs.
@@ -236,7 +259,6 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                     outputs = model(**batch)
                 except Exception as e:
                     # if an error is encountered we want to examine the batch to determine if it is responsible.
-                    error_artifacts_dir = f'{proj_dir}/error_artifacts'
                     os.makedirs(error_artifacts_dir, exist_ok=True)
                     with open(os.path.join(error_artifacts_dir, 'error_batch.pickle'), 'wb') as f:
                         pickle.dump(batch, f)
@@ -279,17 +301,19 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                 if master_step_no % eval_every_x_steps == 0:
                     model.eval()
                     for eval_name in eval_dataloader_dict.keys():
-                        evaluate(model, eval_dataloader_dict[eval_name], eval_name)
+                        evaluate_checkpoint(model, eval_dataloader_dict[eval_name], eval_name)
                     model.train()
 
                 if master_step_no % save_every_x_steps == 0:
+                    accelerator.wait_for_everyone()
                     accelerator.save_state()
 
         model.eval()
         # final evaluation completed.
         for eval_name in eval_dataloader_dict.keys():
-            evaluate(model, eval_dataloader_dict[eval_name], eval_name)
+            evaluate_checkpoint(model, eval_dataloader_dict[eval_name], eval_name)
 
+        accelerator.wait_for_everyone()
         accelerator.save_state()
         accelerator.end_training()
 
