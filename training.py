@@ -16,11 +16,10 @@ from torch.optim import AdamW
 import evaluate
 from accelerate.utils import ProjectConfiguration
 
+
 def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
                 validation_names=None, train_effective_batch_size=256, train_batch_size=4, learning_rate=1e-4,
                 num_warmup_steps=None, num_epochs=2, info_hyperparameters=None):
-
-
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
     if validation_names is None:
@@ -31,7 +30,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
     if num_warmup_steps is None:
         total_steps = len(input_datasets[train_name]) // train_batch_size
-        num_warmup_steps = total_steps // 10 # 1/10th of the total steps should be spent on warm up.
+        num_warmup_steps = total_steps // 10  # 1/10th of the total steps should be spent on warm up.
 
     if info_hyperparameters is None:
         info_hyperparameters = {}
@@ -42,8 +41,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             run_dir = f'./{runs_directory}/{info_hyperparameters["hf_repo"]}'
         else:
             run_dir = f'./{runs_directory}'
-        if not os.path.exists(run_dir):
-            os.makedirs(run_dir)
+        os.makedirs(run_dir, exist_ok=True)
 
         now = datetime.datetime.now()
 
@@ -68,17 +66,15 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
     def tokenize_function(examples):
         # TODO: Try batch sizes of just 1, with no padding, then just ues gradient accumulation steps. See if the inefficiencies of not using batches are offset by the reduced computation for padded sequences.
-        outputs = tokenizer(examples["premise"], examples["hypothesis"], **tokenizer_kwargs)  # TODO: make max length dynamic based on model.
+        outputs = tokenizer(examples["premise"], examples["hypothesis"],
+                            **tokenizer_kwargs)  # TODO: make max length dynamic based on model.
         return outputs
 
     tokenized_datasets = input_datasets.map(tokenize_function, batched=True,
-                                                          # num_proc=8,
-                                          remove_columns=["premise", "hypothesis"], batch_size=train_batch_size)
-
-
+                                            # num_proc=8,
+                                            remove_columns=["premise", "hypothesis"], batch_size=train_batch_size)
 
     tokenized_datasets.set_format("torch")
-
 
     def create_dataloaders(train_batch_size=train_batch_size, eval_batch_size=eval_batch_size):
         train_dataloader = DataLoader(
@@ -144,7 +140,6 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         # Instantiate optimizer
         optimizer = AdamW(params=model.parameters(), lr=hyperparameters["learning_rate"])
 
-
         # modify model config so it can be easily reloaded
 
         id2label = {0: 'contradiction', 1: 'neutral', 2: 'entailment'}
@@ -175,7 +170,6 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             num_training_steps=len(train_dataloader) * num_epochs,
         )
 
-
         for eval_name in eval_dataloader_dict.keys():
             eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])
 
@@ -195,7 +189,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         print(f"INFO: {total_steps=}")
 
         # The hardcoded numbers are the total number of times through the training run that we want each to happen.
-        log_every_x_steps =  total_steps // 1000
+        log_every_x_steps = total_steps // 1000
         eval_every_x_steps = total_steps // 60
         save_every_x_steps = total_steps // 30
 
@@ -255,58 +249,61 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
             for step, batch in enumerate(train_dataloader):
 
-                try:
-                    outputs = model(**batch)
-                except Exception as e:
-                    # if an error is encountered we want to examine the batch to determine if it is responsible.
-                    os.makedirs(error_artifacts_dir, exist_ok=True)
-                    with open(os.path.join(error_artifacts_dir, 'error_batch.pickle'), 'wb') as f:
-                        pickle.dump(batch, f)
-                    raise e
+                with accelerator.accumulate(model):  # actions gradient accumulation steps efficiently.
 
-                loss_raw = outputs.loss
-                loss = loss_raw / gradient_accumulation_steps
+                    try:
+                        outputs = model(**batch)
+                    except Exception as e:
+                        # if an error is encountered we want to examine the batch to determine if it is responsible.
+                        os.makedirs(error_artifacts_dir, exist_ok=True)
+                        with open(os.path.join(error_artifacts_dir, 'error_batch.pickle'), 'wb') as f:
+                            pickle.dump(batch, f)
+                        raise e
 
-                accelerator.backward(loss)
+                    loss_raw = outputs.loss
+                    # loss = loss_raw / gradient_accumulation_steps
+                    loss = loss_raw
 
-                progress_bar.update(1)
+                    accelerator.backward(loss)
 
-                master_step_no = progress_bar.n
+                    progress_bar.update(1)
 
-                step_plus_1 = step + 1
+                    master_step_no = progress_bar.n
 
-                lr_scheduler.step()
+                    step_plus_1 = step + 1
 
-                if step_plus_1 % gradient_accumulation_steps == 0 or step_plus_1 == train_dataloader_len:
+                    lr_scheduler.step()
+
+                    # if step_plus_1 % gradient_accumulation_steps == 0 or step_plus_1 == train_dataloader_len:
                     optimizer.step()
                     optimizer.zero_grad()
 
-                # Append the loss to the list
-                losses_cache.append(loss_raw.item())
-                if master_step_no % log_every_x_steps == 0:
-                    # Log the loss as at the gradient accumulation step.
+                    # Append the loss to the list
+                    losses_cache.append(loss_raw.item())
+                    if master_step_no % log_every_x_steps == 0:
+                        # Log the loss as at the gradient accumulation step.
 
-                    current_lr = float(lr_scheduler.get_last_lr()[0])
+                        current_lr = float(lr_scheduler.get_last_lr()[0])
 
-                    average_loss = torch.tensor(losses_cache, device=accelerator.device).mean()
-                    losses_cache = []  # Clear the cache
+                        average_loss = torch.tensor(losses_cache, device=accelerator.device).mean()
+                        losses_cache = []  # Clear the cache
 
-                    accelerator.log(
-                        {
-                            "train_loss": average_loss,
-                            'lr': current_lr,
-                        },
-                        step=progress_bar.n)
+                        accelerator.log(
+                            {
+                                "train_loss": average_loss,
+                                'lr': current_lr,
+                            },
+                            step=progress_bar.n)
 
-                if master_step_no % eval_every_x_steps == 0:
-                    model.eval()
-                    for eval_name in eval_dataloader_dict.keys():
-                        evaluate_checkpoint(model, eval_dataloader_dict[eval_name], eval_name)
-                    model.train()
+                    if master_step_no % eval_every_x_steps == 0:
+                        model.eval()
+                        for eval_name in eval_dataloader_dict.keys():
+                            evaluate_checkpoint(model, eval_dataloader_dict[eval_name], eval_name)
+                        model.train()
 
-                if master_step_no % save_every_x_steps == 0:
-                    accelerator.wait_for_everyone()
-                    accelerator.save_state()
+                    if master_step_no % save_every_x_steps == 0:
+                        accelerator.wait_for_everyone()
+                        accelerator.save_state()
 
         model.eval()
         # final evaluation completed.
@@ -318,7 +315,6 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         accelerator.end_training()
 
     training_function(model)
-
 
 ## First successful run using max padding.
 # epoch 1: {'accuracy_validation_matched': 0.8935303107488538}

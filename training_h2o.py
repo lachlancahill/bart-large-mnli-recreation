@@ -1,5 +1,6 @@
 from training import train_model
 from transformers import LlamaTokenizerFast, MistralForSequenceClassification
+import datasets_utils
 
 hf_repo = 'h2oai/h2o-danube2-1.8b-base'
 
@@ -12,7 +13,7 @@ if __name__ == '__main__':
 
     runs_directory = 'runs'
 
-    max_seq_length = 8192
+    max_seq_length = 2048
 
     tokenizer = LlamaTokenizerFast.from_pretrained(hf_repo)
 
@@ -23,8 +24,8 @@ if __name__ == '__main__':
     model = MistralForSequenceClassification.from_pretrained(hf_repo, num_labels=3)
 
     if tokenizer.pad_token is None:
-        num_added_toks = tokenizer.add_special_tokens({'pad_token': '<|pad_token|>'})
-        assert num_added_toks == 1
+        num_added_tokens = tokenizer.add_special_tokens({'pad_token': '<|pad_token|>'})
+        assert num_added_tokens == 1
         model.resize_token_embeddings(len(tokenizer))
         # model.config.pad_token = tokenizer.pad_token
         model.config.pad_token_id = tokenizer.pad_token_id
@@ -32,19 +33,30 @@ if __name__ == '__main__':
     tokenizer_kwargs = dict(
         truncation='only_first',
         padding="longest",
-        max_length=8192,
+        max_length=max_seq_length,
     )
 
-    learning_rate = 2e-5
+    learning_rate = 1.1e-4
 
     train_batch_size = 2
 
-    num_warmup_steps = (5_000 * 8) // train_batch_size
+    # input_datasets = datasets_utils.get_mnli()
+    input_datasets = datasets_utils.get_mnli_anli_snli_combined()
 
-    gradient_accumulation_steps = 16 // train_batch_size
+    train_model(
+        tokenizer,
+        model,
+        'runs',
+        tokenizer_kwargs,
+        input_datasets,
+        train_name='train',
+        validation_names=None, # figured out by the training function.
+        # train_effective_batch_size=256,
+        train_effective_batch_size=512,
+        train_batch_size=train_batch_size,
+        learning_rate=learning_rate,
+        num_warmup_steps=None,
+        num_epochs=7,
+        info_hyperparameters=info_hyperparameters,
+    )
 
-    train_effective_batch_size = 256
-
-    train_model(tokenizer, model, runs_directory, tokenizer_kwargs, train_batch_size=train_batch_size, learning_rate=learning_rate,
-                num_warmup_steps=num_warmup_steps, train_effective_batch_size=train_effective_batch_size, num_epochs=2,
-                info_hyperparameters=info_hyperparameters)
