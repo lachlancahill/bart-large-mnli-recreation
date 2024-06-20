@@ -51,8 +51,7 @@ if __name__ == '__main__':
         input_datasets,
         train_name='train',
         validation_names=None, # figured out by the training function.
-        # train_effective_batch_size=256,
-        train_effective_batch_size=512,
+        train_effective_batch_size=256,
         train_batch_size=train_batch_size,
         learning_rate=learning_rate,
         num_warmup_steps=None,
