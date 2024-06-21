@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 from torch.optim import AdamW
 
 import evaluate
-from accelerate.utils import ProjectConfiguration
+from accelerate.utils import ProjectConfiguration, DeepSpeedPlugin, DummyOptim, DummyScheduler
 
 
 def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
@@ -111,10 +111,28 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             project_dir=proj_dir,
             automatic_checkpoint_naming=True
         )
+
+        deepspeed_plugin = DeepSpeedPlugin(
+            # hf_ds_config='./zero_stage_3_config.json',
+            gradient_accumulation_steps=hyperparameters['gradient_accumulation_steps'],
+            gradient_clipping=True,
+            zero_stage=2,
+            offload_optimizer_device='none',
+            offload_param_device='none',
+            zero3_init_flag=False,
+            zero3_save_16bit_model=False,
+        )
+
+
+
         accelerator = Accelerator(
             log_with="tensorboard",
             project_config=config,
             gradient_accumulation_steps=hyperparameters['gradient_accumulation_steps'],
+            # deepspeed_plugin=deepspeed_plugin,
+            mixed_precision='bf16',
+            dataloader_config=None,
+
             # split_batches=True
         )
 
@@ -138,7 +156,15 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         print(f"{accelerator.num_processes=}")
 
         # Instantiate optimizer
-        optimizer = AdamW(params=model.parameters(), lr=hyperparameters["learning_rate"])
+
+        optimizer_cls = (
+            AdamW
+            if accelerator.state.deepspeed_plugin is None
+               or "optimizer" not in accelerator.state.deepspeed_plugin.deepspeed_config
+            else DummyOptim
+        )
+
+        optimizer = optimizer_cls(params=model.parameters(), lr=hyperparameters["learning_rate"])
 
         # modify model config so it can be easily reloaded
 
@@ -164,11 +190,23 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             model, optimizer, train_dataloader
         )
 
-        lr_scheduler = get_linear_schedule_with_warmup(
-            optimizer=optimizer,
-            num_warmup_steps=hyperparameters['num_warmup_steps'],
-            num_training_steps=len(train_dataloader) * num_epochs,
-        )
+        if (
+                accelerator.state.deepspeed_plugin is None
+                or "scheduler" not in accelerator.state.deepspeed_plugin.deepspeed_config
+        ):
+            lr_scheduler = get_linear_schedule_with_warmup(
+                optimizer=optimizer,
+                num_warmup_steps=hyperparameters['num_warmup_steps'],
+                num_training_steps=len(train_dataloader) * num_epochs,
+            )
+        else:
+            lr_scheduler = DummyScheduler(
+                optimizer,
+                num_warmup_steps=hyperparameters['num_warmup_steps'],
+                num_training_steps=len(train_dataloader) * num_epochs,
+            )
+
+        lr_scheduler = accelerator.prepare(lr_scheduler)
 
         for eval_name in eval_dataloader_dict.keys():
             eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])
@@ -184,12 +222,13 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         print(f"{accelerator.is_local_main_process=}")
         print(f"{accelerator.is_main_process=}")
 
+        # progress_bar = tqdm(range(total_steps), disable=not accelerator.is_local_main_process)
         progress_bar = tqdm(range(total_steps), disable=False)
 
         print(f"INFO: {total_steps=}")
 
         # The hardcoded numbers are the total number of times through the training run that we want each to happen.
-        log_every_x_steps = total_steps // 1000
+        log_every_x_steps = 32
         eval_every_x_steps = total_steps // 60
         save_every_x_steps = total_steps // 30
 
@@ -249,7 +288,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
             for step, batch in enumerate(train_dataloader):
 
-                with accelerator.accumulate(model):  # actions gradient accumulation steps efficiently.
+                with accelerator.accumulate(model):
 
                     try:
                         outputs = model(**batch)
@@ -261,49 +300,58 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                         raise e
 
                     loss_raw = outputs.loss
-                    # loss = loss_raw / gradient_accumulation_steps
-                    loss = loss_raw
+                    loss = loss_raw / gradient_accumulation_steps
+                    # loss = loss_raw
 
                     accelerator.backward(loss)
 
-                    progress_bar.update(1)
-
-                    master_step_no = progress_bar.n
-
-                    step_plus_1 = step + 1
-
                     lr_scheduler.step()
 
-                    # if step_plus_1 % gradient_accumulation_steps == 0 or step_plus_1 == train_dataloader_len:
+                    # if master_step_no % gradient_accumulation_steps == 0 or master_step_no == train_dataloader_len:
                     optimizer.step()
                     optimizer.zero_grad()
 
-                    # Append the loss to the list
-                    losses_cache.append(loss_raw.item())
-                    if master_step_no % log_every_x_steps == 0:
-                        # Log the loss as at the gradient accumulation step.
+                # print(f"{accelerator.is_main_process=}")
 
-                        current_lr = float(lr_scheduler.get_last_lr()[0])
+                progress_bar.update(1)
 
-                        average_loss = torch.tensor(losses_cache, device=accelerator.device).mean()
-                        losses_cache = []  # Clear the cache
+                master_step_no = progress_bar.n
 
-                        accelerator.log(
-                            {
-                                "train_loss": average_loss,
-                                'lr': current_lr,
-                            },
-                            step=progress_bar.n)
+                raw_loss_item = loss_raw.item()
 
-                    if master_step_no % eval_every_x_steps == 0:
-                        model.eval()
-                        for eval_name in eval_dataloader_dict.keys():
-                            evaluate_checkpoint(model, eval_dataloader_dict[eval_name], eval_name)
-                        model.train()
+                # print(f"raw loss item: {raw_loss_item}")
 
-                    if master_step_no % save_every_x_steps == 0:
-                        accelerator.wait_for_everyone()
-                        accelerator.save_state()
+                # Append the loss to the list
+                losses_cache.append(raw_loss_item)
+                if master_step_no % log_every_x_steps == 0:
+                    # Log the loss as at the gradient accumulation step.
+
+                    current_lr = float(lr_scheduler.get_last_lr()[0])
+
+                    average_loss = torch.tensor(losses_cache, device='cpu').mean().item()
+                    losses_cache = []  # Clear the cache
+
+                    log_data = {
+                            "train_loss": average_loss,
+                            'lr': current_lr,
+                        }
+                    print(f"Logging: {log_data}")
+
+                    print(f"{accelerator.is_main_process}")
+
+                    accelerator.log(
+                        log_data,
+                        step=progress_bar.n)
+
+                if master_step_no % eval_every_x_steps == 0:
+                    model.eval()
+                    for eval_name in eval_dataloader_dict.keys():
+                        evaluate_checkpoint(model, eval_dataloader_dict[eval_name], eval_name)
+                    model.train()
+
+                if master_step_no % save_every_x_steps == 0:
+                    accelerator.wait_for_everyone()
+                    accelerator.save_state()
 
         model.eval()
         # final evaluation completed.
