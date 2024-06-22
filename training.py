@@ -19,7 +19,7 @@ from accelerate.utils import ProjectConfiguration, DeepSpeedPlugin, DummyOptim, 
 
 def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
                 validation_names=None, train_effective_batch_size=256, train_batch_size=4, learning_rate=1e-4,
-                num_warmup_steps=None, num_epochs=2, info_hyperparameters=None):
+                num_warmup_steps=None, num_epochs=2, info_hyperparameters=None, checkpoint_dir=None):
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
     if validation_names is None:
@@ -211,6 +211,9 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         for eval_name in eval_dataloader_dict.keys():
             eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])
 
+        if checkpoint_dir is not None:
+            accelerator.load_state(checkpoint_dir)
+
         # Register the scheduler
         # accelerator.register_for_checkpointing(lr_scheduler)
         total_steps = num_epochs * len(train_dataloader)
@@ -228,7 +231,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         print(f"INFO: {total_steps=}")
 
         # The hardcoded numbers are the total number of times through the training run that we want each to happen.
-        log_every_x_steps = 32
+        log_every_x_steps = 256
         eval_every_x_steps = total_steps // 60
         save_every_x_steps = total_steps // 30
 
@@ -335,9 +338,9 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                             "train_loss": average_loss,
                             'lr': current_lr,
                         }
-                    print(f"Logging: {log_data}")
+                    # print(f"Logging: {log_data}")
 
-                    print(f"{accelerator.is_main_process}")
+                    # print(f"{accelerator.is_main_process}")
 
                     accelerator.log(
                         log_data,

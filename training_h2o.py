@@ -36,12 +36,15 @@ if __name__ == '__main__':
         max_length=max_seq_length,
     )
 
-    learning_rate = 1.1e-4
+    learning_rate = 8e-5
 
     train_batch_size = 2
 
     # input_datasets = datasets_utils.get_mnli()
     input_datasets = datasets_utils.get_mnli_anli_snli_combined()
+
+    # checkpoint_dir = r'./runs/h2oai/h2o-danube2-1.8b-base/2024-06-21--18-54-33/checkpoints/checkpoint_4'
+    checkpoint_dir = None
 
     train_model(
         tokenizer,
@@ -57,5 +60,6 @@ if __name__ == '__main__':
         num_warmup_steps=None,
         num_epochs=7,
         info_hyperparameters=info_hyperparameters,
+        checkpoint_dir=checkpoint_dir
     )
 
