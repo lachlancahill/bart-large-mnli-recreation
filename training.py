@@ -22,6 +22,9 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                 num_warmup_steps=None, num_epochs=2, info_hyperparameters=None, checkpoint_dir=None):
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
+    if checkpoint_dir is not None:
+        info_hyperparameters['checkpoint_dir'] = checkpoint_dir
+
     if validation_names is None:
         validation_names = [c for c in input_datasets.keys() if c != 'train']
         print(f"INFO: {validation_names=}")
@@ -212,7 +215,9 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])
 
         if checkpoint_dir is not None:
+            model.to('cpu') # Move to cpu while loading states to avoid potential memory errors.
             accelerator.load_state(checkpoint_dir)
+            model.to(accelerator.device)
 
         # Register the scheduler
         # accelerator.register_for_checkpointing(lr_scheduler)
@@ -366,20 +371,3 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         accelerator.end_training()
 
     training_function(model)
-
-## First successful run using max padding.
-# epoch 1: {'accuracy_validation_matched': 0.8935303107488538}
-# epoch 1: {'accuracy_validation_mismatched': 0.8980878763222132}
-# Removed shared tensor {'model.encoder.embed_tokens.weight', 'model.decoder.embed_tokens.weight'} while saving. This should be OK, but check by verifying that you don't receive any warning while reloading
-# 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 98176/98176 [20:00:54<00:00,  1.36it/s]
-# (.lvenv) lachlan@DESKTOPBESTTOP:/mnt/c/Users/lachl/PycharmProjects/bart-large-mnli-recreation$ accelerate launch ./training.py
-
-
-# Second run much faster. Still batch size 8:
-# 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 98176/98176 [3:46:53<00:00, 10.55it/s]epoch 1: {'accuracy_validation_matched': 0.8975038206826287}
-# epoch 1: {'accuracy_validation_mismatched': 0.898393002441009}
-
-
-# from accelerate import notebook_launcher
-#
-# notebook_launcher(training_function, (model,), num_processes=2)

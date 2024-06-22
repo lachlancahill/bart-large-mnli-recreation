@@ -1,5 +1,5 @@
 from training import train_model
-from transformers import LlamaTokenizerFast, MistralForSequenceClassification
+from transformers import LlamaTokenizerFast, MistralForSequenceClassification, AutoConfig
 import datasets_utils
 
 hf_repo = 'h2oai/h2o-danube2-1.8b-base'
@@ -20,6 +20,12 @@ if __name__ == '__main__':
     # configure tokenizer to actually use sequence tokens to delimit premise and hypothesis
     tokenizer.add_eos_token = True
     tokenizer.add_bos_token = True
+
+    run_of_interest = './runs/h2oai/h2o-danube2-1.8b-base/2024-06-21--18-54-33'
+
+    checkpoint_dir = rf'{run_of_interest}/checkpoints/checkpoint_4'
+
+    # config = AutoConfig.from_pretrained(f'{run_of_interest}/config_checkpoint')
 
     model = MistralForSequenceClassification.from_pretrained(hf_repo, num_labels=3)
 
@@ -43,8 +49,7 @@ if __name__ == '__main__':
     # input_datasets = datasets_utils.get_mnli()
     input_datasets = datasets_utils.get_mnli_anli_snli_combined()
 
-    # checkpoint_dir = r'./runs/h2oai/h2o-danube2-1.8b-base/2024-06-21--18-54-33/checkpoints/checkpoint_4'
-    checkpoint_dir = None
+    # checkpoint_dir = None
 
     train_model(
         tokenizer,
@@ -60,6 +65,6 @@ if __name__ == '__main__':
         num_warmup_steps=None,
         num_epochs=7,
         info_hyperparameters=info_hyperparameters,
-        checkpoint_dir=checkpoint_dir
+        checkpoint_dir=checkpoint_dir,
     )
 
