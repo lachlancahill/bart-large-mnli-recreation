@@ -48,7 +48,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
         now = datetime.datetime.now()
 
-        now_folder = now.strftime("%Y-%m-%d--%H-%M-%S")
+        now_folder = now.strftime("%Y-%m-%d--%H-%M")
 
         proj_dir = f"{run_dir}/{now_folder}"
 
