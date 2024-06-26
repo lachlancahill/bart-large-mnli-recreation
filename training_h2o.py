@@ -42,7 +42,9 @@ if __name__ == '__main__':
         max_length=max_seq_length,
     )
 
-    learning_rate = 6e-5
+    # TODO: freeze earliest parameters to keep word meanings from original model.
+
+    learning_rate = 1e-5
 
     train_batch_size = 2
 
