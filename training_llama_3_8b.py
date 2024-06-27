@@ -2,14 +2,28 @@ from training import train_model
 from transformers import LlamaTokenizerFast, MistralForSequenceClassification, AutoConfig
 import datasets_utils
 
-hf_repo = 'h2oai/h2o-danube2-1.8b-base'
+hf_repo = 'meta-llama/Meta-Llama-3-8B-Instruct'
+
+
+def llama_3_framing_function(premises, hypotheses):
+    zsc_prefix = 'The following is a Zero Shot Classification Problem.\nPremise:\n'
+    zsc_hypothesis = '\nHypothesis:\n'
+    zsc_suffix = '\nClassification (Entailment, Neutral or Contradiction):\n'
+
+    new_premises, new_hypotheses = [], []
+    for premise, hypothesis in zip(premises, hypotheses):
+        new_premises.append(f'{zsc_prefix}{premise}')
+        new_hypotheses.append(f'{zsc_hypothesis}{hypothesis}{zsc_suffix}')
+
+    return new_premises, new_hypotheses
+
 
 if __name__ == '__main__':
 
 
     runs_directory = 'runs'
 
-    max_seq_length = 2048
+    max_seq_length = 8000
 
     tokenizer = LlamaTokenizerFast.from_pretrained(hf_repo)
 
@@ -38,7 +52,7 @@ if __name__ == '__main__':
     for param in model.parameters():
         param.requires_grad = False
 
-    num_layers_to_unfreeze = 3
+    num_layers_to_unfreeze = 1
     # Fine-tune only the final normalization layer
     for block in model.model.layers[-num_layers_to_unfreeze:]:
         for param in block.parameters():

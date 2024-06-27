@@ -19,11 +19,17 @@ from accelerate.utils import ProjectConfiguration, DeepSpeedPlugin, DummyOptim, 
 
 def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
                 validation_names=None, train_effective_batch_size=256, train_batch_size=4, learning_rate=1e-4,
-                num_warmup_steps=None, num_epochs=2, info_hyperparameters=None, checkpoint_dir=None):
+                num_warmup_steps=None, num_epochs=2, info_hyperparameters=None, checkpoint_dir=None,
+                add_llm_framing=False, custom_llm_framing_function=None):
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
     if checkpoint_dir is not None:
         info_hyperparameters['checkpoint_dir'] = checkpoint_dir
+
+    def count_trainable_parameters(model_passed):
+        return sum(p.numel() for p in model_passed.parameters() if p.requires_grad)
+
+    info_hyperparameters['total_trainable_params'] = count_trainable_parameters(model)
 
     if validation_names is None:
         validation_names = [c for c in input_datasets.keys() if c != 'train']
@@ -67,10 +73,29 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
     eval_batch_size = train_batch_size
 
+    def add_framing_for_llm_classification_default(premises, hypotheses):
+
+        zsc_prefix = 'The following is a Zero Shot Classification Problem.\nPremise:\n'
+        zsc_hypothesis = '\nHypothesis:\n'
+        zsc_suffix = '\nClassification (Entailment, Neutral or Contradiction):\n'
+
+        new_premises, new_hypotheses = [], []
+        for premise, hypothesis in zip(premises, hypotheses):
+            new_premises.append(f'{zsc_prefix}{premise}')
+            new_hypotheses.append(f'{zsc_hypothesis}{hypothesis}{zsc_suffix}')
+
+        return new_premises, new_hypotheses
+
+    framing_function_to_use = add_framing_for_llm_classification_default if custom_llm_framing_function is None else custom_llm_framing_function
+
     def tokenize_function(examples):
-        # TODO: Try batch sizes of just 1, with no padding, then just ues gradient accumulation steps. See if the inefficiencies of not using batches are offset by the reduced computation for padded sequences.
-        outputs = tokenizer(examples["premise"], examples["hypothesis"],
-                            **tokenizer_kwargs)  # TODO: make max length dynamic based on model.
+
+        if add_llm_framing:
+            new_premises, new_hypotheses = framing_function_to_use(examples["premise"], examples["hypothesis"])
+            outputs = tokenizer(new_premises, new_hypotheses, **tokenizer_kwargs)
+        else:
+            outputs = tokenizer(examples["premise"], examples["hypothesis"],**tokenizer_kwargs)
+
         return outputs
 
     tokenized_datasets = input_datasets.map(tokenize_function, batched=True,
