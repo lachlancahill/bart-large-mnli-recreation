@@ -1,19 +1,31 @@
 from training import train_model
-from transformers import LlamaTokenizerFast, MistralForSequenceClassification, AutoConfig
+from transformers import PreTrainedTokenizerFast, LlamaForSequenceClassification, AutoConfig
 import datasets_utils
 
 hf_repo = 'meta-llama/Meta-Llama-3-8B-Instruct'
 
 
 def llama_3_framing_function(premises, hypotheses):
-    zsc_prefix = 'The following is a Zero Shot Classification Problem.\nPremise:\n'
-    zsc_hypothesis = '\nHypothesis:\n'
-    zsc_suffix = '\nClassification (Entailment, Neutral or Contradiction):\n'
+
+    zsc_template = """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+The user will provide a Zero Shot Classification Problem. Respond only with the correct classification 'Entailment', 'Neutral' or 'Contradiction'.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+Premise:
+{premise}
+
+Hypothesis:
+{hypothesis}
+
+Respond with only one word, the correct classification 'Entailment', 'Neutral' or 'Contradiction'.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+The correct classification is '"""
+
 
     new_premises, new_hypotheses = [], []
     for premise, hypothesis in zip(premises, hypotheses):
-        new_premises.append(f'{zsc_prefix}{premise}')
-        new_hypotheses.append(f'{zsc_hypothesis}{hypothesis}{zsc_suffix}')
+        new_premises.append(zsc_template.format(premise=premise, hypothesis=hypothesis))
+        # new_hypotheses.append(f'{zsc_hypothesis}{hypothesis}{zsc_suffix}')
+        new_hypotheses.append('') # remove as all information is in the premise.
 
     return new_premises, new_hypotheses
 
@@ -25,7 +37,7 @@ if __name__ == '__main__':
 
     max_seq_length = 8000
 
-    tokenizer = LlamaTokenizerFast.from_pretrained(hf_repo)
+    tokenizer = PreTrainedTokenizerFast.from_pretrained(hf_repo)
 
     # configure tokenizer to actually use sequence tokens to delimit premise and hypothesis
     # tokenizer.add_eos_token = True
@@ -36,7 +48,7 @@ if __name__ == '__main__':
 
     # config = AutoConfig.from_pretrained(f'{run_of_interest}/config_checkpoint')
 
-    model = MistralForSequenceClassification.from_pretrained(hf_repo, num_labels=3)
+    model = LlamaForSequenceClassification.from_pretrained(hf_repo, num_labels=3)
     assert tokenizer.eos_token is not None and model.config.eos_token_id is not None
     tokenizer.pad_token = tokenizer.eos_token
     model.config.pad_token_id = model.config.eos_token_id
@@ -72,7 +84,7 @@ if __name__ == '__main__':
 
     learning_rate = 3e-5
 
-    train_batch_size = 16
+    train_batch_size = 4
 
     # input_datasets = datasets_utils.get_mnli()
     input_datasets = datasets_utils.get_mnli_anli_snli_combined()
@@ -93,7 +105,8 @@ if __name__ == '__main__':
         num_warmup_steps=None,
         num_epochs=7,
         info_hyperparameters=info_hyperparameters,
-        add_llm_framing=True
+        add_llm_framing=True,
+        custom_llm_framing_function=llama_3_framing_function
         # checkpoint_dir=checkpoint_dir,
     )
 
