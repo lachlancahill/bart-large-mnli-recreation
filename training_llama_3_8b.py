@@ -64,7 +64,7 @@ if __name__ == '__main__':
     for param in model.parameters():
         param.requires_grad = False
 
-    print(f"INFO: Number of layers: {len(model.model.layers)}")
+    print(f"INFO: Total number of layers: {len(model.model.layers)}")
 
     num_layers_to_unfreeze = 3
     # Fine-tune only the final normalization layer
@@ -84,7 +84,7 @@ if __name__ == '__main__':
         'num_layers_to_unfreeze':num_layers_to_unfreeze,
     }
 
-    learning_rate = 3e-5
+    learning_rate = 1e-5
 
     train_batch_size = 2
 

@@ -1,1 +1,1 @@
-OMP_NUM_THREADS=10 accelerate launch --config_file=./accelerate_config_zero_stage_1.yaml ./training_roberta_large.py
+OMP_NUM_THREADS=24 accelerate launch --config_file=./accelerate_config_zero_stage_1.yaml ./training_roberta_large.py
