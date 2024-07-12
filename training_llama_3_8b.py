@@ -64,7 +64,9 @@ if __name__ == '__main__':
     for param in model.parameters():
         param.requires_grad = False
 
-    num_layers_to_unfreeze = 1
+    print(f"INFO: Number of layers: {len(model.model.layers)}")
+
+    num_layers_to_unfreeze = 3
     # Fine-tune only the final normalization layer
     for block in model.model.layers[-num_layers_to_unfreeze:]:
         for param in block.parameters():
@@ -84,7 +86,7 @@ if __name__ == '__main__':
 
     learning_rate = 3e-5
 
-    train_batch_size = 4
+    train_batch_size = 2
 
     # input_datasets = datasets_utils.get_mnli()
     input_datasets = datasets_utils.get_mnli_anli_snli_combined()
