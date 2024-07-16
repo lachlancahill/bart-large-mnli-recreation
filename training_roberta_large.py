@@ -40,6 +40,6 @@ if __name__ == '__main__':
         train_batch_size=16,
         learning_rate=9e-5,
         num_warmup_steps=None,
-        num_epochs=7,
+        num_epochs=15,
         info_hyperparameters=info_hyperparameters,
     )
