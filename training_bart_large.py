@@ -21,10 +21,12 @@ if __name__ == '__main__':
 
     info_hyperparameters = {
         'hf_repo': hf_repo,
-        'precision':'mixed'
+        'precision':'mixed',
+        'dataset': 'all',
     }
 
-    input_datasets = datasets_utils.get_mnli_anli_snli_combined()
+    # input_datasets = datasets_utils.get_mnli_anli_snli_combined()
+    input_datasets = datasets_utils.get_all_datasets()
 
     train_model(
         tokenizer,

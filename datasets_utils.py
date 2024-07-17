@@ -1,5 +1,6 @@
 from datasets import load_dataset, concatenate_datasets, DatasetDict, load_from_disk
 from config import random_seed
+import platform
 
 
 def remap_labels_for_consistency(examples, label_col='labels'):
@@ -35,12 +36,22 @@ def remap_labels_for_consistency(examples, label_col='labels'):
 
 
 def perform_remap(input_dataset: DatasetDict, label_col='labels'):
-    remapped_dataset = input_dataset.map(
-        lambda x: remap_labels_for_consistency(x, label_col=label_col),
-        batched=True,
-        batch_size=1000,
-        num_proc=8,
-    )
+    # remapped_dataset = input_dataset.map(
+    #     lambda x: remap_labels_for_consistency(x, label_col=label_col),
+    #     batched=True,
+    #     batch_size=1000,
+    #     num_proc=8,
+    # )
+
+    id2label = {
+        "0": "contradiction",
+        "1": "neutral",
+        "2": "entailment",
+    }
+
+    label2id = {v:k for k,v in id2label.items()}
+
+    remapped_dataset = input_dataset.align_labels_with_mapping(label2id, label_column=label_col)
 
     return remapped_dataset
 
@@ -131,7 +142,28 @@ def get_mnli_anli_snli_combined():
 
 
 def get_llama_output_dataset():
-    data_path = r'C:\Users\Administrator\PycharmProjects\classification-dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_reviews_combined'
+    # Original Windows path
+    windows_data_path = r'C:\Users\Administrator\PycharmProjects\classification-dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_reviews_combined'
+
+    def convert_path_for_wsl(windows_path):
+        """Convert a Windows path to a WSL path."""
+        return windows_path.replace('\\', '/').replace('C:', '/mnt/c')
+
+    # Detect if the script is running on WSL
+    def is_wsl():
+        """Check if the script is running on WSL."""
+        if platform.system() == 'Linux':
+            with open('/proc/version', 'r') as f:
+                if 'microsoft' in f.read().lower():
+                    return True
+        return False
+
+    # Start with the Windows path
+    data_path = windows_data_path
+
+    # Convert the path if running on WSL
+    if is_wsl():
+        data_path = convert_path_for_wsl(windows_data_path)
 
     llama_data = load_from_disk(data_path).shuffle(seed=random_seed).train_test_split(test_size=3000, seed=random_seed)
 
