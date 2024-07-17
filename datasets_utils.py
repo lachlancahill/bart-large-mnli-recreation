@@ -1,6 +1,5 @@
-from datasets import load_dataset, concatenate_datasets, DatasetDict, Dataset
+from datasets import load_dataset, concatenate_datasets, DatasetDict, load_from_disk
 from config import random_seed
-
 
 def remap_labels_for_consistency(examples, label_col='labels'):
     """
@@ -25,6 +24,10 @@ def remap_labels_for_consistency(examples, label_col='labels'):
         0: 2,
         1: 1,
         2: 0,
+        # also relabel if labels are text.
+        'entailment': 2,
+        'neutral': 1,
+        'contradiction': 0,
     }
     examples[label_col] = [remap_dict[i] for i in examples[label_col]]
     return examples
@@ -125,3 +128,49 @@ def get_mnli_anli_snli_combined():
     print(f"{combined_dataset=}")
 
     return combined_dataset
+
+def get_llama_output_dataset():
+
+    data_path = r'C:\Users\Administrator\PycharmProjects\classification-dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_reviews_combined'
+
+    llama_data = load_from_disk(data_path).shuffle(seed=random_seed).train_test_split(test_size=3000, seed=random_seed)
+
+    llama_data = clean_dataset_columns(llama_data)
+
+    # remap to align with original bart_large_mnli model.
+    llama_data = perform_remap(llama_data)
+
+    return llama_data
+
+
+
+def get_all_datasets():
+
+    public_datasets = get_mnli_anli_snli_combined()
+
+    llama_datasets = get_llama_output_dataset()
+
+
+    combined_train = concatenate_datasets([
+        public_datasets['train'],
+        llama_datasets['train']
+    ]).shuffle(seed=random_seed)
+
+    # Create a DatasetDict
+    combined_dataset = DatasetDict({
+        'train': combined_train,
+        'mnli_validation_matched': public_datasets['mnli_validation_matched'],
+        'mnli_validation_mismatched': public_datasets['mnli_validation_mismatched'],
+        'anli_combined_validation': public_datasets['anli_combined_validation'],
+        'snli_validation': public_datasets['snli_validation'],
+        'llama_labeled_validation': llama_datasets['test'],
+    })
+
+    print(f"{combined_dataset=}")
+
+    return combined_dataset
+
+
+
+if __name__ == '__main__':
+    get_all_datasets()
