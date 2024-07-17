@@ -1,6 +1,7 @@
 from datasets import load_dataset, concatenate_datasets, DatasetDict, load_from_disk
 from config import random_seed
 
+
 def remap_labels_for_consistency(examples, label_col='labels'):
     """
     For some reason, facebook's model reversed the label values
@@ -98,7 +99,6 @@ def get_mnli_anli_snli_combined():
     anli = perform_remap(anli)
     snli = perform_remap(snli)
 
-
     # Combine the train datasets
     combined_train = concatenate_datasets([
         # mnli
@@ -129,12 +129,13 @@ def get_mnli_anli_snli_combined():
 
     return combined_dataset
 
-def get_llama_output_dataset():
 
+def get_llama_output_dataset():
     data_path = r'C:\Users\Administrator\PycharmProjects\classification-dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_reviews_combined'
 
     llama_data = load_from_disk(data_path).shuffle(seed=random_seed).train_test_split(test_size=3000, seed=random_seed)
 
+    # Clean and remap in one go
     llama_data = clean_dataset_columns(llama_data)
 
     # remap to align with original bart_large_mnli model.
@@ -143,13 +144,10 @@ def get_llama_output_dataset():
     return llama_data
 
 
-
 def get_all_datasets():
-
     public_datasets = get_mnli_anli_snli_combined()
 
     llama_datasets = get_llama_output_dataset()
-
 
     combined_train = concatenate_datasets([
         public_datasets['train'],
@@ -169,7 +167,6 @@ def get_all_datasets():
     print(f"{combined_dataset=}")
 
     return combined_dataset
-
 
 
 if __name__ == '__main__':
