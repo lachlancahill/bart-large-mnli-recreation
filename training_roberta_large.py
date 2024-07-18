@@ -26,7 +26,9 @@ if __name__ == '__main__':
     }
 
     # input_datasets = datasets_utils.get_mnli()
-    input_datasets = datasets_utils.get_mnli_anli_snli_combined()
+    # input_datasets = datasets_utils.get_mnli_anli_snli_combined()
+    input_datasets = datasets_utils.get_all_datasets()
+
 
     train_model(
         tokenizer,
