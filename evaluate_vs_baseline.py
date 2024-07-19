@@ -12,9 +12,9 @@ eval_training_data = True
 
 # parameters relating to the custom model we are testing.
 original_id = 'facebook/bart-large-mnli'
-config_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-17--17-32-44\config_checkpoint'
-checkpoint_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-17--17-32-44\checkpoints\checkpoint_17'
-max_length = 512
+config_path = r'C:\Users\Administrator\PycharmProjects\bart-large-mnli-recreation\runs\facebook\bart-large\2024-07-17--23-09\config_checkpoint'
+checkpoint_path = r'C:\Users\Administrator\PycharmProjects\bart-large-mnli-recreation\runs\facebook\bart-large\2024-07-17--23-09\checkpoints\checkpoint_30'
+max_length = 1024
 
 
 device = torch.device('cuda:0')
@@ -30,10 +30,11 @@ tokenizer_custom = AutoTokenizer.from_pretrained(original_id)
 model_custom = AutoModelForSequenceClassification.from_pretrained(checkpoint_path, config=config, device_map=device, torch_dtype=torch.bfloat16)
 
 # Load the dataset
-dataset = load_dataset('glue', 'mnli')
+from datasets_utils import get_llama_output_dataset
+dataset = get_llama_output_dataset()
 train_dataset = dataset['train']
-validation_matched = dataset['validation_matched']
-validation_mismatched = dataset['validation_mismatched']
+validation_matched = dataset['test']
+# validation_mismatched = dataset['validation_mismatched']
 
 
 eval_batch_size = 8
@@ -75,27 +76,27 @@ def remap_labels_for_pretrained(examples):
     return examples
 
 
-remapped_train_dataset = train_dataset.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
-remapped_validation_matched = validation_matched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
-remapped_validation_mismatched = validation_mismatched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+# remapped_train_dataset = train_dataset.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+# remapped_validation_matched = validation_matched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+# remapped_validation_mismatched = validation_mismatched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
 
 
-train_dataset_pretrained = remapped_train_dataset.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
-validation_matched_pretrained = remapped_validation_matched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
-validation_mismatched_pretrained = remapped_validation_mismatched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+train_dataset_pretrained = train_dataset.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["premise", "hypothesis"])
+validation_matched_pretrained = validation_matched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["premise", "hypothesis"])
+# validation_mismatched_pretrained = remapped_validation_mismatched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
 
-train_dataset_custom = remapped_train_dataset.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
-validation_matched_custom = remapped_validation_matched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
-validation_mismatched_custom = remapped_validation_mismatched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+train_dataset_custom = train_dataset.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["premise", "hypothesis"])
+validation_matched_custom = validation_matched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["premise", "hypothesis"])
+# validation_mismatched_custom = remapped_validation_mismatched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
 
 
 train_dataset_pretrained.set_format('torch')
 validation_matched_pretrained.set_format('torch')
-validation_mismatched_pretrained.set_format('torch')
+# validation_mismatched_pretrained.set_format('torch')
 
 train_dataset_custom.set_format('torch')
 validation_matched_custom.set_format('torch')
-validation_mismatched_custom.set_format('torch')
+# validation_mismatched_custom.set_format('torch')
 
 def collate_fn(batch):
     default_collated_batch = default_collate(batch)
@@ -105,12 +106,12 @@ def collate_fn(batch):
 
 loader_train_dataset_pretrained = DataLoader(train_dataset_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
 loader_validation_matched_pretrained = DataLoader(validation_matched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
-loader_validation_mismatched_pretrained = DataLoader(validation_mismatched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
+# loader_validation_mismatched_pretrained = DataLoader(validation_mismatched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
 
 
 loader_train_dataset_custom = DataLoader(train_dataset_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
 loader_validation_matched_custom = DataLoader(validation_matched_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
-loader_validation_mismatched_custom = DataLoader(validation_mismatched_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
+# loader_validation_mismatched_custom = DataLoader(validation_mismatched_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
 
 
 def evaluate_model(model, dataloader):
@@ -130,14 +131,14 @@ def evaluate_model(model, dataloader):
 # Evaluate on different splits
 accuracy_pretrained_val_matched = evaluate_model(model_pretrained, loader_validation_matched_pretrained)
 accuracy_custom_val_matched = evaluate_model(model_custom, loader_validation_matched_custom)
-accuracy_pretrained_val_mismatched = evaluate_model(model_pretrained, loader_validation_mismatched_pretrained)
-accuracy_custom_val_mismatched = evaluate_model(model_custom, loader_validation_mismatched_custom)
+# accuracy_pretrained_val_mismatched = evaluate_model(model_pretrained, loader_validation_mismatched_pretrained)
+# accuracy_custom_val_mismatched = evaluate_model(model_custom, loader_validation_mismatched_custom)
 
 # Assuming you have the accuracy values stored as mentioned in the previous steps
 data = {
-    'Model': ['BART-large-MNLI', 'Custom BART'],
+    'Model': ['BART-large-MNLI', 'Custom Model'],
     'Validation Matched Accuracy': [accuracy_pretrained_val_matched, accuracy_custom_val_matched],
-    'Validation Mismatched Accuracy': [accuracy_pretrained_val_mismatched, accuracy_custom_val_mismatched]
+    # 'Validation Mismatched Accuracy': [accuracy_pretrained_val_mismatched, accuracy_custom_val_mismatched]
 }
 
 if eval_training_data:
