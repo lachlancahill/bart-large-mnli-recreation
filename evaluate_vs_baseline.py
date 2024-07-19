@@ -1,65 +1,53 @@
 import tqdm
-from transformers import BartForSequenceClassification, BartTokenizer, AutoTokenizer, AutoConfig
+from transformers import BartForSequenceClassification, BartTokenizer, AutoTokenizer, AutoConfig, AutoModelForSequenceClassification
 from datasets import load_dataset
 import torch
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score
 import pandas as pd
 from torch.utils.data.dataloader import default_collate
-import os
-import torch.multiprocessing as mp
 
-os.environ['TOKENIZERS_PARALLELISM'] = 'true'
 
-eval_batch_size = 1
+eval_training_data = True
 
-def evaluate_model_worker(model, dataloader, return_dict=None, idx=None):
-    model.eval()
-    predictions = []
-    references = []
+# parameters relating to the custom model we are testing.
+original_id = 'facebook/bart-large-mnli'
+config_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-17--17-32-44\config_checkpoint'
+checkpoint_path = r'C:\Users\lachl\PycharmProjects\bart-large-mnli-recreation\runs\google-t5\t5-large\2024-06-17--17-32-44\checkpoints\checkpoint_17'
+max_length = 512
 
-    if idx is None:
-        desc = "Evaluating model"
-    else:
-        desc = f'Evaluating {idx}'
 
-    for batch in tqdm.tqdm(dataloader, desc=desc):
-        with torch.no_grad():
-            outputs = model(**batch)
-        logits = outputs.logits
-        predictions.extend(logits.argmax(dim=-1).tolist())
-        references.extend(batch['labels'].tolist())
-    accuracy = accuracy_score(references, predictions)
-    if return_dict is not None:
-        return_dict[idx] = accuracy
-    else:
-        return accuracy
+device = torch.device('cuda:0')
 
-def parallel_evaluate_model(model, dataloader, num_workers):
+# Load Facebook's pre-trained BART-large-MNLI model
+bart_id = 'facebook/bart-large-mnli'
+tokenizer_pretrained = BartTokenizer.from_pretrained(bart_id)
+model_pretrained = BartForSequenceClassification.from_pretrained(bart_id, device_map=device, torch_dtype=torch.bfloat16)
 
-    if num_workers > 1:
+# Load your custom-trained model
+config = AutoConfig.from_pretrained(config_path)
+tokenizer_custom = AutoTokenizer.from_pretrained(original_id)
+model_custom = AutoModelForSequenceClassification.from_pretrained(checkpoint_path, config=config, device_map=device, torch_dtype=torch.bfloat16)
 
-        manager = mp.Manager()
-        return_dict = manager.dict()
-        processes = []
+# Load the dataset
+dataset = load_dataset('glue', 'mnli')
+train_dataset = dataset['train']
+validation_matched = dataset['validation_matched']
+validation_mismatched = dataset['validation_mismatched']
 
-        # Split the dataloader into chunks for each worker
-        dataloader_chunks = torch.utils.data.random_split(dataloader.dataset, [len(dataloader.dataset) // num_workers] * num_workers)
 
-        for idx in range(num_workers):
-            p = mp.Process(target=evaluate_model_worker, args=(model, DataLoader(dataloader_chunks[idx], batch_size=eval_batch_size, collate_fn=collate_fn), return_dict, idx))
-            p.start()
-            processes.append(p)
+eval_batch_size = 8
 
-        for p in processes:
-            p.join()
+def tokenize_function_pretrained(examples):
+    tok_result = tokenizer_pretrained(examples["premise"], examples["hypothesis"], truncation='only_first', padding="longest", max_length=1024)
+    return tok_result
 
-        # Combine results from all workers
-        accuracies = [return_dict[idx] for idx in range(num_workers)]
-        return sum(accuracies) / len(accuracies)
 
-    else:
-        return evaluate_model_worker(model, dataloader)
+def tokenize_function_custom(examples):
+    tok_result = tokenizer_custom(examples["premise"], examples["hypothesis"], truncation='only_first', padding="longest", max_length=max_length)
+    return tok_result
+
+
 def remap_labels_for_pretrained(examples):
     """
     For some reason, facebook's model reversed the label values
@@ -87,111 +75,76 @@ def remap_labels_for_pretrained(examples):
     return examples
 
 
-device = torch.device('cuda')
+remapped_train_dataset = train_dataset.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+remapped_validation_matched = validation_matched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+remapped_validation_mismatched = validation_mismatched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
+
+
+train_dataset_pretrained = remapped_train_dataset.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_matched_pretrained = remapped_validation_matched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_mismatched_pretrained = remapped_validation_mismatched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+
+train_dataset_custom = remapped_train_dataset.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_matched_custom = remapped_validation_matched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+validation_mismatched_custom = remapped_validation_mismatched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=["idx", "premise", "hypothesis"])
+
+
+train_dataset_pretrained.set_format('torch')
+validation_matched_pretrained.set_format('torch')
+validation_mismatched_pretrained.set_format('torch')
+
+train_dataset_custom.set_format('torch')
+validation_matched_custom.set_format('torch')
+validation_mismatched_custom.set_format('torch')
+
 def collate_fn(batch):
     default_collated_batch = default_collate(batch)
     correct_device_batch = {k:v.to(device) for k,v in default_collated_batch.items()}
     return correct_device_batch
 
-def main():
 
-    eval_training_data = False
-
-    # parameters relating to the custom model we are testing.
-    original_id = 'facebook/bart-large-mnli'
-
-    config_path = r'./runs/facebook/bart-large/2024-07-17--23-09/config_checkpoint'
-    checkpoint_path = r'./runs/facebook/bart-large/2024-07-17--23-09/checkpoints/checkpoint_30'
-    max_length = 1024
+loader_train_dataset_pretrained = DataLoader(train_dataset_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_matched_pretrained = DataLoader(validation_matched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_mismatched_pretrained = DataLoader(validation_mismatched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn)
 
 
-    # Set the number of threads to the number of CPU cores you want to use
-    torch.set_num_threads(1)  # Adjust this based on your CPU capabilities
-    torch.set_num_interop_threads(1)
+loader_train_dataset_custom = DataLoader(train_dataset_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_matched_custom = DataLoader(validation_matched_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
+loader_validation_mismatched_custom = DataLoader(validation_mismatched_custom, batch_size=eval_batch_size, collate_fn=collate_fn)
 
-    # Load Facebook's pre-trained BART-large-MNLI model
-    bart_id = 'facebook/bart-large-mnli'
-    tokenizer_pretrained = BartTokenizer.from_pretrained(bart_id)
-    model_pretrained = BartForSequenceClassification.from_pretrained(bart_id, device_map=device, torch_dtype=torch.bfloat16)
 
-    # Load your custom-trained model
-    config = AutoConfig.from_pretrained(config_path)
-    tokenizer_custom = AutoTokenizer.from_pretrained(original_id)
+def evaluate_model(model, dataloader):
+    model.eval()
+    predictions = []
+    references = []
 
-    from checkpoint_to_model import load_deepspeed_checkpoint
+    for batch in tqdm.tqdm(dataloader, desc='Evaluating'):
+        with torch.no_grad():
+            outputs = model(**batch)
+        logits = outputs.logits
+        predictions.extend(logits.argmax(dim=-1).tolist())
+        references.extend(batch['labels'].tolist())
+    accuracy = accuracy_score(references, predictions)
+    return accuracy
 
-    model_custom = load_deepspeed_checkpoint(checkpoint_path, config=config, device_map=device, torch_dtype=torch.bfloat16)
+# Evaluate on different splits
+accuracy_pretrained_val_matched = evaluate_model(model_pretrained, loader_validation_matched_pretrained)
+accuracy_custom_val_matched = evaluate_model(model_custom, loader_validation_matched_custom)
+accuracy_pretrained_val_mismatched = evaluate_model(model_pretrained, loader_validation_mismatched_pretrained)
+accuracy_custom_val_mismatched = evaluate_model(model_custom, loader_validation_mismatched_custom)
 
-    def tokenize_function_pretrained(examples):
-        tok_result = tokenizer_pretrained(examples["premise"], examples["hypothesis"], truncation='only_first',
-                                          padding="longest", max_length=1024)
-        return tok_result
+# Assuming you have the accuracy values stored as mentioned in the previous steps
+data = {
+    'Model': ['BART-large-MNLI', 'Custom BART'],
+    'Validation Matched Accuracy': [accuracy_pretrained_val_matched, accuracy_custom_val_matched],
+    'Validation Mismatched Accuracy': [accuracy_pretrained_val_mismatched, accuracy_custom_val_mismatched]
+}
 
-    def tokenize_function_custom(examples):
-        tok_result = tokenizer_custom(examples["premise"], examples["hypothesis"], truncation='only_first',
-                                      padding="longest", max_length=max_length)
-        return tok_result
+if eval_training_data:
+    accuracy_pretrained_train = evaluate_model(model_pretrained, loader_train_dataset_pretrained)
+    accuracy_custom_train = evaluate_model(model_custom, loader_train_dataset_custom)
+    data['Train Accuracy'] = [accuracy_pretrained_train, accuracy_custom_train]
 
-    # Load the dataset
-    from datasets_utils import get_llama_output_dataset
-    dataset = get_llama_output_dataset()
-    train_dataset = dataset['train']
-    validation_matched = dataset['test']
-    # validation_mismatched = dataset['validation_mismatched']
+results_df = pd.DataFrame(data)
+print(results_df.to_string(), "\n")
 
-    # remapped_train_dataset = train_dataset.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
-    # remapped_validation_matched = validation_matched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
-    # remapped_validation_mismatched = validation_mismatched.map(remap_labels_for_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=["label"])
-
-    cols_to_remove = ["premise", "hypothesis"]
-
-    train_dataset_pretrained = train_dataset.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=cols_to_remove)
-    validation_matched_pretrained = validation_matched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=cols_to_remove)
-    # validation_mismatched_pretrained = remapped_validation_mismatched.map(tokenize_function_pretrained, batched=True, batch_size=eval_batch_size, remove_columns=cols_to_remove)
-
-    train_dataset_custom = train_dataset.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=cols_to_remove)
-    validation_matched_custom = validation_matched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=cols_to_remove)
-    # validation_mismatched_custom = remapped_validation_mismatched.map(tokenize_function_custom, batched=True, batch_size=eval_batch_size, remove_columns=cols_to_remove)
-
-    train_dataset_pretrained.set_format('torch')
-    validation_matched_pretrained.set_format('torch')
-    # validation_mismatched_pretrained.set_format('torch')
-
-    train_dataset_custom.set_format('torch')
-    validation_matched_custom.set_format('torch')
-    # validation_mismatched_custom.set_format('torch')
-
-    # Set the number of workers to the number of CPU cores you want to use
-    dataloader_workers = 1  # You can adjust this number based on your CPU capabilities
-
-    loader_train_dataset_pretrained = DataLoader(train_dataset_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn, num_workers=dataloader_workers)
-    loader_validation_matched_pretrained = DataLoader(validation_matched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn, num_workers=dataloader_workers)
-    # loader_validation_mismatched_pretrained = DataLoader(validation_mismatched_pretrained, batch_size=eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
-
-    loader_train_dataset_custom = DataLoader(train_dataset_custom, batch_size=eval_batch_size, collate_fn=collate_fn, num_workers=dataloader_workers)
-    loader_validation_matched_custom = DataLoader(validation_matched_custom, batch_size=eval_batch_size, collate_fn=collate_fn, num_workers=dataloader_workers)
-    # loader_validation_mismatched_custom = DataLoader(validation_mismatched_custom, batch_size=eval_batch_size, collate_fn=collate_fn, num_workers=num_workers)
-
-    # Evaluate on different splits using parallel evaluation
-    accuracy_pretrained_val_matched = parallel_evaluate_model(model_pretrained, loader_validation_matched_pretrained, dataloader_workers)
-    accuracy_custom_val_matched = parallel_evaluate_model(model_custom, loader_validation_matched_custom, dataloader_workers)
-    # accuracy_pretrained_val_mismatched = parallel_evaluate_model(model_pretrained, loader_validation_mismatched_pretrained, num_workers)
-    # accuracy_custom_val_mismatched = parallel_evaluate_model(model_custom, loader_validation_mismatched_custom, num_workers)
-
-    # Assuming you have the accuracy values stored as mentioned in the previous steps
-    data = {
-        'Model': ['BART-large-MNLI', f'Custom Model'],
-        'Validation Matched Accuracy': [accuracy_pretrained_val_matched, accuracy_custom_val_matched],
-        # 'Validation Mismatched Accuracy': [accuracy_pretrained_val_mismatched, accuracy_custom_val_mismatched]
-    }
-
-    if eval_training_data:
-        accuracy_pretrained_train = parallel_evaluate_model(model_pretrained, loader_train_dataset_pretrained, dataloader_workers)
-        accuracy_custom_train = parallel_evaluate_model(model_custom, loader_train_dataset_custom, dataloader_workers)
-        data['Train Accuracy'] = [accuracy_pretrained_train, accuracy_custom_train]
-
-    results_df = pd.DataFrame(data)
-    print(results_df.to_string(), "\n")
-
-if __name__ == '__main__':
-    main()
