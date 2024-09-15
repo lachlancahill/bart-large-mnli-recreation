@@ -1,0 +1,1 @@
+OMP_NUM_THREADS=12 accelerate launch --config_file=./accelerate_config_zero_stage_1.yaml ./training_bart_large_mnli.py

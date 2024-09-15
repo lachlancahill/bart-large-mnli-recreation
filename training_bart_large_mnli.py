@@ -26,7 +26,8 @@ if __name__ == '__main__':
     }
 
     # input_datasets = datasets_utils.get_mnli_anli_snli_combined()
-    input_datasets = datasets_utils.get_all_datasets()
+    # input_datasets = datasets_utils.get_all_datasets()
+    input_datasets = datasets_utils.get_transcript_and_mnli()
 
     train_model(
         tokenizer,
@@ -38,8 +39,9 @@ if __name__ == '__main__':
         validation_names=None, # figured out by the training function.
         train_effective_batch_size=256,
         train_batch_size=16,
-        learning_rate=7e-5,
+        learning_rate=1e-5,
         num_warmup_steps=None,
         num_epochs=5,
         info_hyperparameters=info_hyperparameters,
+        evaluate_before_training=True,
     )

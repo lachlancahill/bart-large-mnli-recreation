@@ -25,7 +25,7 @@ if not is_windows:
 def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
                 validation_names=None, train_effective_batch_size=256, train_batch_size=4, learning_rate=1e-4,
                 num_warmup_steps=None, num_epochs=2, info_hyperparameters=None, checkpoint_dir=None,
-                add_llm_framing=False, custom_llm_framing_function=None):
+                add_llm_framing=False, custom_llm_framing_function=None, evaluate_before_training=False):
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
     if checkpoint_dir is not None:
@@ -261,7 +261,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         print(f"{accelerator.is_main_process=}")
 
         # progress_bar = tqdm(range(total_steps), disable=not accelerator.is_local_main_process)
-        progress_bar = tqdm(range(total_steps), disable=False)
+        progress_bar = tqdm(range(total_steps), disable=False, desc='Training', smoothing=1.0)
 
         print(f"INFO: {total_steps=}")
 
@@ -320,6 +320,8 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
         # TODO: First train just the classification head by freezing all other parameters, then unfreeze and
         #  train the full model.
+
+        is_first_batch = True
 
         for epoch in range(num_epochs):
             model.train()
@@ -381,7 +383,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                         log_data,
                         step=progress_bar.n)
 
-                if master_step_no % eval_every_x_steps == 0:
+                if (is_first_batch and evaluate_before_training) or master_step_no % eval_every_x_steps == 0:
                     model.eval()
                     for eval_name in eval_dataloader_dict.keys():
                         evaluate_checkpoint(model, eval_dataloader_dict[eval_name], eval_name)
@@ -390,6 +392,9 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                 if master_step_no % save_every_x_steps == 0:
                     accelerator.wait_for_everyone()
                     accelerator.save_state()
+
+                if is_first_batch:
+                    is_first_batch = False
 
         model.eval()
         # final evaluation completed.

@@ -34,7 +34,6 @@ def remap_labels_for_consistency(examples, label_col='labels'):
     examples[label_col] = [remap_dict[i] for i in examples[label_col]]
     return examples
 
-
 def perform_remap(input_dataset: DatasetDict, label_col='labels'):
     # remapped_dataset = input_dataset.map(
     #     lambda x: remap_labels_for_consistency(x, label_col=label_col),
@@ -42,6 +41,7 @@ def perform_remap(input_dataset: DatasetDict, label_col='labels'):
     #     batch_size=1000,
     #     num_proc=8,
     # )
+
 
     id2label = {
         "0": "contradiction",
@@ -54,7 +54,6 @@ def perform_remap(input_dataset: DatasetDict, label_col='labels'):
     remapped_dataset = input_dataset.align_labels_with_mapping(label2id, label_column=label_col)
 
     return remapped_dataset
-
 
 def clean_dataset_columns(input_dataset_dict: DatasetDict):
     rename = {
@@ -87,9 +86,9 @@ def get_mnli():
     raw_datasets = load_dataset("glue", "mnli")
     raw_datasets = raw_datasets.filter(function=lambda x: x['label'] != -1)
 
-    remapped_datasets = perform_remap(raw_datasets)
+    remapped_datasets = clean_dataset_columns(raw_datasets)
 
-    remapped_datasets = clean_dataset_columns(remapped_datasets)
+    remapped_datasets = perform_remap(remapped_datasets)
 
     return remapped_datasets
 
@@ -140,11 +139,14 @@ def get_mnli_anli_snli_combined():
 
     return combined_dataset
 
+
+import os
 def convert_path_for_wsl(windows_path):
-    if platform.system() == 'Linux':
+    if not os.name == 'nt':
+        print(f"INFO: Converting path `{windows_path}`")
         # Remove drive letter and convert backslashes to forward slashes
-        path = windows_path.replace('\\', '/').split(':')[-1]
-        return f"/mnt/{path[1].lower()}{path[2:]}"
+        drive, path = windows_path.replace('\\', '/').split(':')
+        return f"/mnt/{drive.lower()}{path}"
     else:
         return windows_path
 
@@ -178,6 +180,32 @@ def get_transcript_context_dataset():
     return get_local_dataset(data_path)
 
 
+def get_transcript_and_mnli():
+
+    transcript_dataset = get_transcript_context_dataset()
+
+    print(f"INFO: First examples of transcript_dataset:")
+    print(transcript_dataset['train'][:5])
+
+    mnli = get_mnli()
+
+    combined_train = concatenate_datasets([
+        mnli['train'],
+        transcript_dataset['train'],
+    ]).shuffle(seed=random_seed)
+
+    # Create a DatasetDict
+    combined_dataset = DatasetDict({
+        'train': combined_train,
+        'mnli_validation_matched': mnli['validation_matched'],
+        'mnli_validation_mismatched': mnli['validation_mismatched'],
+        'llama_transcripts_validation': transcript_dataset['test'],
+    })
+
+    print(f"{combined_dataset=}")
+
+    return combined_dataset
+
 
 def get_all_datasets():
     public_datasets = get_mnli_anli_snli_combined()
@@ -209,4 +237,5 @@ def get_all_datasets():
 
 
 if __name__ == '__main__':
-    get_all_datasets()
+    # get_all_datasets()
+    get_transcript_and_mnli()
