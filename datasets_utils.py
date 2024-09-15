@@ -140,32 +140,20 @@ def get_mnli_anli_snli_combined():
 
     return combined_dataset
 
+def convert_path_for_wsl(windows_path):
+    if platform.system() == 'Linux':
+        # Remove drive letter and convert backslashes to forward slashes
+        path = windows_path.replace('\\', '/').split(':')[-1]
+        return f"/mnt/{path[1].lower()}{path[2:]}"
+    else:
+        return windows_path
 
-def get_llama_output_dataset():
-    # Original Windows path
-    windows_data_path = r'C:\Users\Administrator\PycharmProjects\classification-dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_reviews_combined'
 
-    def convert_path_for_wsl(windows_path):
-        """Convert a Windows path to a WSL path."""
-        return windows_path.replace('\\', '/').replace('C:', '/mnt/c')
+def get_local_dataset(windows_data_path, test_size=0.2):
 
-    # Detect if the script is running on WSL
-    def is_wsl():
-        """Check if the script is running on WSL."""
-        if platform.system() == 'Linux':
-            with open('/proc/version', 'r') as f:
-                if 'microsoft' in f.read().lower():
-                    return True
-        return False
+    data_path = convert_path_for_wsl(windows_data_path)
 
-    # Start with the Windows path
-    data_path = windows_data_path
-
-    # Convert the path if running on WSL
-    if is_wsl():
-        data_path = convert_path_for_wsl(windows_data_path)
-
-    llama_data = load_from_disk(data_path).shuffle(seed=random_seed).train_test_split(test_size=3000, seed=random_seed)
+    llama_data = load_from_disk(data_path).shuffle(seed=random_seed).train_test_split(test_size=test_size, seed=random_seed)
 
     # Clean and remap in one go
     llama_data = clean_dataset_columns(llama_data)
@@ -176,14 +164,32 @@ def get_llama_output_dataset():
     return llama_data
 
 
+def get_llama_output_dataset():
+
+    windows_data_path = r'C:\Users\Administrator\PycharmProjects\classification-dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_reviews_combined'
+
+    return get_local_dataset(windows_data_path)
+
+
+def get_transcript_context_dataset():
+
+    data_path = r'C:\Users\Administrator\PycharmProjects\sythentic_classification_data\zero_shot_classification_dataset'
+
+    return get_local_dataset(data_path)
+
+
+
 def get_all_datasets():
     public_datasets = get_mnli_anli_snli_combined()
 
     llama_datasets = get_llama_output_dataset()
 
+    transcript_dataset = get_transcript_context_dataset()
+
     combined_train = concatenate_datasets([
         public_datasets['train'],
-        llama_datasets['train']
+        llama_datasets['train'],
+        transcript_dataset['train'],
     ]).shuffle(seed=random_seed)
 
     # Create a DatasetDict
@@ -194,6 +200,7 @@ def get_all_datasets():
         'anli_combined_validation': public_datasets['anli_combined_validation'],
         'snli_validation': public_datasets['snli_validation'],
         'llama_labeled_validation': llama_datasets['test'],
+        'llama_transcripts_validation': transcript_dataset['test'],
     })
 
     print(f"{combined_dataset=}")

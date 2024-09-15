@@ -1,4 +1,5 @@
 import datetime
+import os
 import os.path
 import pickle
 from config import random_seed
@@ -14,7 +15,11 @@ from tqdm.auto import tqdm
 from torch.optim import AdamW
 
 import evaluate
-from accelerate.utils import ProjectConfiguration, DeepSpeedPlugin, DummyOptim, DummyScheduler
+
+is_windows = os.name == 'nt'
+
+if not is_windows:
+    from accelerate.utils import ProjectConfiguration, DeepSpeedPlugin, DummyOptim, DummyScheduler
 
 
 def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datasets, train_name='train',
@@ -140,16 +145,16 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
             automatic_checkpoint_naming=True
         )
 
-        deepspeed_plugin = DeepSpeedPlugin(
-            # hf_ds_config='./zero_stage_3_config.json',
-            gradient_accumulation_steps=hyperparameters['gradient_accumulation_steps'],
-            gradient_clipping=True,
-            zero_stage=2,
-            offload_optimizer_device='none',
-            offload_param_device='none',
-            zero3_init_flag=False,
-            zero3_save_16bit_model=False,
-        )
+        # deepspeed_plugin = DeepSpeedPlugin(
+        #     # hf_ds_config='./zero_stage_3_config.json',
+        #     gradient_accumulation_steps=hyperparameters['gradient_accumulation_steps'],
+        #     gradient_clipping=True,
+        #     zero_stage=2,
+        #     offload_optimizer_device='none',
+        #     offload_param_device='none',
+        #     zero3_init_flag=False,
+        #     zero3_save_16bit_model=False,
+        # )
 
 
 
@@ -187,7 +192,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
         optimizer_cls = (
             AdamW
-            if accelerator.state.deepspeed_plugin is None
+            if is_windows or accelerator.state.deepspeed_plugin is None
                or "optimizer" not in accelerator.state.deepspeed_plugin.deepspeed_config
             else DummyOptim
         )
