@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     # input_datasets = datasets_utils.get_mnli_anli_snli_combined()
     # input_datasets = datasets_utils.get_all_datasets()
-    input_datasets = datasets_utils.get_transcript_and_mnli(mnli_for_evaluation_only=mnli_for_evaluation_only)
+    input_datasets = datasets_utils.get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionally_confusing_data=True)
 
     train_model(
         tokenizer,

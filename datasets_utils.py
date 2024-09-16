@@ -180,12 +180,15 @@ def get_transcript_context_dataset():
     return get_local_dataset(data_path)
 
 
-def get_transcript_and_mnli(mnli_for_evaluation_only=False):
+def get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionally_confusing_data=False):
 
     transcript_dataset = get_transcript_context_dataset()
 
     print(f"INFO: First examples of transcript_dataset:")
     print(transcript_dataset['train'][:5])
+
+
+    print(f"{transcript_dataset['train']=}")
 
     mnli = get_mnli()
 
@@ -197,13 +200,34 @@ def get_transcript_and_mnli(mnli_for_evaluation_only=False):
             transcript_dataset['train'],
         ]).shuffle(seed=random_seed)
 
+    intentionally_confusing_validation_dict = {}
+    if include_intentionally_confusing_data:
+        llama_transcripts_confusing = get_local_dataset(r'C:\Users\Administrator\PycharmProjects\sythentic_classification_data\zero_shot_classification_confusing_dataset')
+
+        print(f"INFO: Adding intentionally confusing data:")
+        print(llama_transcripts_confusing['train'][:5])
+        print(f"{llama_transcripts_confusing['train']=}")
+        print(f"{llama_transcripts_confusing['test']=}")
+
+        combined_train = concatenate_datasets([
+            combined_train,
+            llama_transcripts_confusing['train'],
+        ]).shuffle(seed=random_seed)
+
+        intentionally_confusing_validation_dict = {
+            'llama_transcripts_intentionally_validation': llama_transcripts_confusing['test']
+        }
+
+
     # Create a DatasetDict
     combined_dataset = DatasetDict({
         'train': combined_train,
         'mnli_validation_matched': mnli['validation_matched'],
         'mnli_validation_mismatched': mnli['validation_mismatched'],
         'llama_transcripts_validation': transcript_dataset['test'],
+        **intentionally_confusing_validation_dict,
     })
+
 
     print(f"{len(combined_dataset['train'])=}")
 
@@ -241,4 +265,4 @@ def get_all_datasets():
 
 if __name__ == '__main__':
     # get_all_datasets()
-    get_transcript_and_mnli()
+    get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionally_confusing_data=True)
