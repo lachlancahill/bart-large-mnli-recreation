@@ -180,7 +180,7 @@ def get_transcript_context_dataset():
     return get_local_dataset(data_path)
 
 
-def get_transcript_and_mnli():
+def get_transcript_and_mnli(mnli_for_evaluation_only=False):
 
     transcript_dataset = get_transcript_context_dataset()
 
@@ -189,10 +189,13 @@ def get_transcript_and_mnli():
 
     mnli = get_mnli()
 
-    combined_train = concatenate_datasets([
-        mnli['train'],
-        transcript_dataset['train'],
-    ]).shuffle(seed=random_seed)
+    if mnli_for_evaluation_only:
+        combined_train = transcript_dataset['train'].shuffle(seed=random_seed)
+    else:
+        combined_train = concatenate_datasets([
+            mnli['train'],
+            transcript_dataset['train'],
+        ]).shuffle(seed=random_seed)
 
     # Create a DatasetDict
     combined_dataset = DatasetDict({
@@ -202,7 +205,7 @@ def get_transcript_and_mnli():
         'llama_transcripts_validation': transcript_dataset['test'],
     })
 
-    print(f"{combined_dataset=}")
+    print(f"{len(combined_dataset)=}")
 
     return combined_dataset
 

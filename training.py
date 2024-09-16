@@ -261,7 +261,7 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         print(f"{accelerator.is_main_process=}")
 
         # progress_bar = tqdm(range(total_steps), disable=not accelerator.is_local_main_process)
-        progress_bar = tqdm(range(total_steps), disable=False, desc='Training', smoothing=1.0)
+        progress_bar = tqdm(range(total_steps), disable=False, desc='Training', smoothing=0.0)
 
         print(f"INFO: {total_steps=}")
 
