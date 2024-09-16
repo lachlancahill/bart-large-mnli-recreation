@@ -215,7 +215,7 @@ def get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionall
         ]).shuffle(seed=random_seed)
 
         intentionally_confusing_validation_dict = {
-            'llama_transcripts_intentionally_validation': llama_transcripts_confusing['test']
+            'llama_transcripts_confusing_validation': llama_transcripts_confusing['test']
         }
 
 
