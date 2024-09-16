@@ -205,7 +205,7 @@ def get_transcript_and_mnli(mnli_for_evaluation_only=False):
         'llama_transcripts_validation': transcript_dataset['test'],
     })
 
-    print(f"{len(combined_dataset)=}")
+    print(f"{len(combined_dataset['train'])=}")
 
     return combined_dataset
 
