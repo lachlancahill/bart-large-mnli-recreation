@@ -1,6 +1,6 @@
 from datasets import load_dataset, concatenate_datasets, DatasetDict, load_from_disk
 from config import random_seed
-import platform
+import os
 
 
 def remap_labels_for_consistency(examples, label_col='labels'):
@@ -34,6 +34,7 @@ def remap_labels_for_consistency(examples, label_col='labels'):
     examples[label_col] = [remap_dict[i] for i in examples[label_col]]
     return examples
 
+
 def perform_remap(input_dataset: DatasetDict, label_col='labels'):
     # remapped_dataset = input_dataset.map(
     #     lambda x: remap_labels_for_consistency(x, label_col=label_col),
@@ -42,18 +43,18 @@ def perform_remap(input_dataset: DatasetDict, label_col='labels'):
     #     num_proc=8,
     # )
 
-
     id2label = {
         "0": "contradiction",
         "1": "neutral",
         "2": "entailment",
     }
 
-    label2id = {v:k for k,v in id2label.items()}
+    label2id = {v: k for k, v in id2label.items()}
 
     remapped_dataset = input_dataset.align_labels_with_mapping(label2id, label_column=label_col)
 
     return remapped_dataset
+
 
 def clean_dataset_columns(input_dataset_dict: DatasetDict):
     rename = {
@@ -140,7 +141,6 @@ def get_mnli_anli_snli_combined():
     return combined_dataset
 
 
-import os
 def convert_path_for_wsl(windows_path):
     if not os.name == 'nt':
         print(f"INFO: Converting path `{windows_path}`")
@@ -152,10 +152,10 @@ def convert_path_for_wsl(windows_path):
 
 
 def get_local_dataset(windows_data_path, test_size=0.2):
-
     data_path = convert_path_for_wsl(windows_data_path)
 
-    llama_data = load_from_disk(data_path).shuffle(seed=random_seed).train_test_split(test_size=test_size, seed=random_seed)
+    llama_data = load_from_disk(data_path).shuffle(seed=random_seed).train_test_split(test_size=test_size,
+                                                                                      seed=random_seed)
 
     # Clean and remap in one go
     llama_data = clean_dataset_columns(llama_data)
@@ -167,26 +167,24 @@ def get_local_dataset(windows_data_path, test_size=0.2):
 
 
 def get_llama_output_dataset():
-
-    windows_data_path = r'C:\Users\Administrator\PycharmProjects\classification-dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_reviews_combined'
+    windows_data_path = (r'C:\Users\Administrator\PycharmProjects\classification-'
+                         r'dataset-generation\balanced_dataset_classify_feedback_using_llama3_result_bank_'
+                         r'reviews_combined')
 
     return get_local_dataset(windows_data_path)
 
 
 def get_transcript_context_dataset():
-
     data_path = r'C:\Users\Administrator\PycharmProjects\sythentic_classification_data\zero_shot_classification_dataset'
 
     return get_local_dataset(data_path)
 
 
-def get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionally_confusing_data=False):
-
+def get_transcript_and_mnli(mnli_for_evaluation_only=False, include_alternative_datasets=False):
     transcript_dataset = get_transcript_context_dataset()
 
     print(f"INFO: First examples of transcript_dataset:")
     print(transcript_dataset['train'][:5])
-
 
     print(f"{transcript_dataset['train']=}")
 
@@ -200,24 +198,37 @@ def get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionall
             transcript_dataset['train'],
         ]).shuffle(seed=random_seed)
 
-    intentionally_confusing_validation_dict = {}
-    if include_intentionally_confusing_data:
-        llama_transcripts_confusing = get_local_dataset(r'C:\Users\Administrator\PycharmProjects\sythentic_classification_data\zero_shot_classification_confusing_dataset')
+    alternative_datasets_validation_dict = {}
+    if include_alternative_datasets:
 
-        print(f"INFO: Adding intentionally confusing data:")
-        print(llama_transcripts_confusing['train'][:5])
-        print(f"{llama_transcripts_confusing['train']=}")
-        print(f"{llama_transcripts_confusing['test']=}")
+        synthetic_root = r'C:\Users\Administrator\PycharmProjects\sythentic_classification_data'
+
+        alt_datasets = [
+            # (alt_data_path, validation_data_name)
+            (r'zero_shot_classification_confusing_dataset', 'llama_transcripts_confusing_validation'),
+            (r'zero_shot_classification_mistral_nemo_dataset', 'mistral_nemo_transcripts_validation'),
+            (r'zero_shot_classification_qwen_2_5_14b_dataset', 'qwen_2_5_14b_transcripts_validation'),
+            (r'zero_shot_classification_qwen_2_5_coder_7b_dataset', 'qwen_2_5_coder_7b_transcripts_validation'),
+        ]
+
+        all_train_datasets = []
+
+        for alt_data_name, validation_data_name in alt_datasets:
+            alt_data_path = f"{synthetic_root}\\{alt_data_name}"
+            transcripts_dataset_dict = get_local_dataset(alt_data_path)
+
+            print(f"INFO: Adding intentionally confusing data:")
+            print(f"{transcripts_dataset_dict['train']=}")
+            print(f"{transcripts_dataset_dict['test']=}")
+
+            all_train_datasets.append(transcripts_dataset_dict['train'])
+
+            alternative_datasets_validation_dict[validation_data_name] = transcripts_dataset_dict['test']
 
         combined_train = concatenate_datasets([
             combined_train,
-            llama_transcripts_confusing['train'],
+            *all_train_datasets,
         ]).shuffle(seed=random_seed)
-
-        intentionally_confusing_validation_dict = {
-            'llama_transcripts_confusing_validation': llama_transcripts_confusing['test']
-        }
-
 
     # Create a DatasetDict
     combined_dataset = DatasetDict({
@@ -225,11 +236,10 @@ def get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionall
         'mnli_validation_matched': mnli['validation_matched'],
         'mnli_validation_mismatched': mnli['validation_mismatched'],
         'llama_transcripts_validation': transcript_dataset['test'],
-        **intentionally_confusing_validation_dict,
+        **alternative_datasets_validation_dict,
     })
 
-
-    print(f"{len(combined_dataset['train'])=}")
+    print(f"{combined_dataset['train']=}")
 
     return combined_dataset
 
@@ -265,4 +275,4 @@ def get_all_datasets():
 
 if __name__ == '__main__':
     # get_all_datasets()
-    get_transcript_and_mnli(mnli_for_evaluation_only=False, include_intentionally_confusing_data=True)
+    get_transcript_and_mnli(mnli_for_evaluation_only=False, include_alternative_datasets=True)
