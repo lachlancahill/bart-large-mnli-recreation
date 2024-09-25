@@ -43,11 +43,12 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
     gradient_accumulation_steps = train_effective_batch_size // train_batch_size
 
     if num_warmup_steps is None:
-        total_steps = len(input_datasets[train_name]) // train_batch_size
+        total_steps = (len(input_datasets[train_name]) * num_epochs ) // train_batch_size
         num_warmup_steps = total_steps // 10  # 1/10th of the total steps should be spent on warm up.
 
     if info_hyperparameters is None:
         info_hyperparameters = {}
+
 
     def get_tensorboard_writer_dir():
 
@@ -124,6 +125,14 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
 
     # train_dataloader, eval_dataloader, eval_mismatched_dataloader = create_dataloaders()
 
+    validation_data_lengths = {}
+    for eval_name in validation_names:
+        data_len = len(tokenized_datasets[eval_name])
+        print(f"INFO: Length of validation dataset {eval_name} is {data_len}")
+        validation_data_lengths[f"val_{eval_name}_length"] = data_len
+
+    info_hyperparameters = {**info_hyperparameters, **validation_data_lengths}
+
     metric = evaluate.load("glue", "mnli", trust_remote_code=True)
 
     hyperparameters = {
@@ -136,6 +145,8 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
         "seed": random_seed,
         **info_hyperparameters,
     }
+
+    print(f"INFO: {hyperparameters=}")
 
     def training_function(model):
         # Initialize accelerator
@@ -227,19 +238,28 @@ def train_model(tokenizer, model, runs_directory, tokenizer_kwargs, input_datase
                 accelerator.state.deepspeed_plugin is None
                 or "scheduler" not in accelerator.state.deepspeed_plugin.deepspeed_config
         ):
+            training_steps = (len(train_dataloader) * num_epochs * accelerator.num_processes) // hyperparameters['gradient_accumulation_steps']
+            warmup = training_steps // 10
+            print(f"INFO: lr_scheduler defined using get_linear_schedule_with_warmup. {warmup=}. {training_steps=}")
             lr_scheduler = get_linear_schedule_with_warmup(
                 optimizer=optimizer,
-                num_warmup_steps=hyperparameters['num_warmup_steps'],
-                num_training_steps=len(train_dataloader) * num_epochs,
+                num_warmup_steps=warmup,
+                num_training_steps=training_steps,
             )
         else:
+            print(f"INFO: lr_scheduler defined using DummyScheduler")
             lr_scheduler = DummyScheduler(
                 optimizer,
                 num_warmup_steps=hyperparameters['num_warmup_steps'],
-                num_training_steps=len(train_dataloader) * num_epochs,
+                num_training_steps=(len(train_dataloader) * num_epochs) // hyperparameters["train_batch_size"],
             )
 
+        print(f"INFO: Pre-preparation lr-scheduler: {lr_scheduler}")
+
         lr_scheduler = accelerator.prepare(lr_scheduler)
+
+        print(f"INFO: Post-preparation lr-scheduler: {lr_scheduler}")
+
 
         for eval_name in eval_dataloader_dict.keys():
             eval_dataloader_dict[eval_name] = accelerator.prepare(eval_dataloader_dict[eval_name])

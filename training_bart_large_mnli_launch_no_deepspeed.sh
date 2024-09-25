@@ -1,0 +1,1 @@
+OMP_NUM_THREADS=8 accelerate launch --config_file=./accelerate_config_dual_gpu_no_deepspeed.yaml ./training_bart_large_mnli.py

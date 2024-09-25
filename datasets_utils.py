@@ -180,62 +180,46 @@ def get_transcript_context_dataset():
     return get_local_dataset(data_path)
 
 
-def get_transcript_and_mnli(mnli_for_evaluation_only=False, include_alternative_datasets=False):
-    transcript_dataset = get_transcript_context_dataset()
-
-    print(f"INFO: First examples of transcript_dataset:")
-    print(transcript_dataset['train'][:5])
-
-    print(f"{transcript_dataset['train']=}")
+def get_transcript_and_mnli():
 
     mnli = get_mnli()
 
-    if mnli_for_evaluation_only:
-        combined_train = transcript_dataset['train'].shuffle(seed=random_seed)
-    else:
-        combined_train = concatenate_datasets([
-            mnli['train'],
-            transcript_dataset['train'],
-        ]).shuffle(seed=random_seed)
-
     alternative_datasets_validation_dict = {}
-    if include_alternative_datasets:
 
-        synthetic_root = r'C:\Users\Administrator\PycharmProjects\sythentic_classification_data'
+    synthetic_root = r'C:\Users\Administrator\PycharmProjects\sythentic_classification_data'
 
-        alt_datasets = [
-            # (alt_data_path, validation_data_name)
-            (r'zero_shot_classification_confusing_dataset', 'llama_transcripts_confusing_validation'),
-            (r'zero_shot_classification_mistral_nemo_dataset', 'mistral_nemo_transcripts_validation'),
-            (r'zero_shot_classification_qwen_2_5_14b_dataset', 'qwen_2_5_14b_transcripts_validation'),
-            (r'zero_shot_classification_qwen_2_5_coder_7b_dataset', 'qwen_2_5_coder_7b_transcripts_validation'),
-        ]
+    alt_datasets = [# (alt_data_path, validation_data_name)
+        # ('zero_shot_classification_dataset', 'llama_transcripts_validation'),
+        ('zero_shot_classification_confusing_dataset', 'llama_transcripts_confusing_validation'),
+        ('zero_shot_classification_mistral_nemo_dataset', 'mistral_nemo_transcripts_validation'),
+        ('zero_shot_classification_qwen_2_5_14b_dataset', 'qwen_2_5_14b_transcripts_validation'),
+        # (r'zero_shot_classification_qwen_2_5_coder_7b_dataset', 'qwen_2_5_coder_7b_transcripts_validation'),
+    ]
 
-        all_train_datasets = []
+    all_train_datasets = []
 
-        for alt_data_name, validation_data_name in alt_datasets:
-            alt_data_path = f"{synthetic_root}\\{alt_data_name}"
-            transcripts_dataset_dict = get_local_dataset(alt_data_path)
+    for alt_data_name, validation_data_name in alt_datasets:
+        alt_data_path = f"{synthetic_root}\\{alt_data_name}"
+        transcripts_dataset_dict = get_local_dataset(alt_data_path)
 
-            print(f"INFO: Adding intentionally confusing data:")
-            print(f"{transcripts_dataset_dict['train']=}")
-            print(f"{transcripts_dataset_dict['test']=}")
+        print(f"INFO: Adding synthetic data {alt_data_name}:")
+        print(f"{transcripts_dataset_dict['train']=}")
+        print(f"{transcripts_dataset_dict['test']=}")
 
-            all_train_datasets.append(transcripts_dataset_dict['train'])
+        all_train_datasets.append(transcripts_dataset_dict['train'])
 
-            alternative_datasets_validation_dict[validation_data_name] = transcripts_dataset_dict['test']
+        alternative_datasets_validation_dict[validation_data_name] = transcripts_dataset_dict['test']
 
-        combined_train = concatenate_datasets([
-            combined_train,
-            *all_train_datasets,
-        ]).shuffle(seed=random_seed)
+    combined_train = concatenate_datasets([
+        mnli['train'],
+        *all_train_datasets,
+    ]).shuffle(seed=random_seed)
 
     # Create a DatasetDict
     combined_dataset = DatasetDict({
         'train': combined_train,
         'mnli_validation_matched': mnli['validation_matched'],
         'mnli_validation_mismatched': mnli['validation_mismatched'],
-        'llama_transcripts_validation': transcript_dataset['test'],
         **alternative_datasets_validation_dict,
     })
 
